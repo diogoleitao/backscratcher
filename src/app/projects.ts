@@ -20,6 +20,12 @@ export async function listProjects(): Promise<ProjectList> {
   }
 }
 
-export function readRegisteredProject(project: Project): Promise<ProjectModel> {
-  return readProject(project.path, { prLookup: async () => [] });
+export async function readRegisteredProject(
+  project: Project,
+): Promise<{ model: ProjectModel } | { error: string }> {
+  try {
+    return { model: await readProject(project.path, { prLookup: async () => [] }) };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
 }

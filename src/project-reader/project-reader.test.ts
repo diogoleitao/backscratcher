@@ -36,13 +36,16 @@ async function snapshot(root: string): Promise<Entry[]> {
 }
 
 async function readFixture(name: string, trackerFolder?: string) {
-  return readUntouched(path.join(fixtures, name), trackerFolder);
+  return readUntouched(path.join(fixtures, name), { trackerFolder });
 }
 
-async function readUntouched(projectPath: string, trackerFolder?: string) {
-  const before = await snapshot(projectPath);
+async function readUntouched(
+  projectPath: string,
+  { trackerFolder, root = projectPath }: { trackerFolder?: string; root?: string } = {},
+) {
+  const before = await snapshot(root);
   const model = await readProject(projectPath, { trackerFolder, prLookup: noPrs });
-  expect(await snapshot(projectPath)).toEqual(before);
+  expect(await snapshot(root)).toEqual(before);
   return { projectPath, model };
 }
 
@@ -81,6 +84,12 @@ describe("readProject", () => {
 
     expect(model.features.map((feature) => feature.slug)).toEqual(["checkout", "search"]);
     expect(model.skipped).toEqual(["archive", "zeta"]);
+  });
+
+  it("orders names by letter regardless of case", async () => {
+    const { model } = await readFixture("mixed-case-names");
+
+    expect(model.features.map((feature) => feature.slug)).toEqual(["alpha", "Zeta"]);
   });
 
   it("skips a directory whose spec.md is a folder", async () => {
@@ -134,9 +143,22 @@ describe("readProject", () => {
       await symlink(elsewhere, path.join(projectPath, ".scratch", "search"));
       await symlink(path.join(dir, "gone"), path.join(projectPath, ".scratch", "dangling"));
 
-      const { model } = await readUntouched(projectPath);
+      const { model } = await readUntouched(projectPath, { root: dir });
 
       expect(model.features).toEqual([{ slug: "search", spec: { source: "# Search\n" } }]);
+      expect(model.skipped).toEqual([]);
+    });
+
+    it("ignores a symlink loop", async () => {
+      dir = await realpath(await mkdtemp(path.join(tmpdir(), "backscratcher-reader-")));
+      const trackerPath = path.join(dir, ".scratch");
+      await mkdir(path.join(trackerPath, "checkout"), { recursive: true });
+      await writeFile(path.join(trackerPath, "checkout", "spec.md"), "# Checkout\n");
+      await symlink(path.join(trackerPath, "loop"), path.join(trackerPath, "loop"));
+
+      const { model } = await readUntouched(dir);
+
+      expect(model.features.map((feature) => feature.slug)).toEqual(["checkout"]);
       expect(model.skipped).toEqual([]);
     });
   });

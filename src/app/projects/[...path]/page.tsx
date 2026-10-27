@@ -14,7 +14,7 @@ export default async function ProjectPage({
   searchParams: Promise<{ feature?: string | string[] }>;
 }) {
   const { path: rawSegments } = await params;
-  const { feature: slug } = await searchParams;
+  const { feature } = await searchParams;
   const projectList = await listProjects();
   if ("error" in projectList) return <p role="alert">{projectList.error}</p>;
 
@@ -27,7 +27,7 @@ export default async function ProjectPage({
         <section>
           <h2>{path.basename(project.path)}</h2>
           <p>{project.path}</p>
-          <ProjectContent project={project} slug={typeof slug === "string" ? slug : undefined} />
+          <ProjectContent project={project} feature={feature} />
         </section>
       ) : (
         <p role="alert">/{segments.join("/")} is not a registered Project.</p>
@@ -36,11 +36,21 @@ export default async function ProjectPage({
   );
 }
 
-async function ProjectContent({ project, slug }: { project: Project; slug?: string }) {
-  const model = await readRegisteredProject(project);
-  if (slug === undefined) return <ProjectOverview project={project} model={model} />;
+async function ProjectContent({
+  project,
+  feature: slug,
+}: {
+  project: Project;
+  feature?: string | string[];
+}) {
+  if (Array.isArray(slug)) {
+    return <p role="alert">This URL names {slug.length} Features. Open one at a time.</p>;
+  }
+  const read = await readRegisteredProject(project);
+  if ("error" in read) return <p role="alert">{read.error}</p>;
+  if (!slug) return <ProjectOverview project={project} model={read.model} />;
 
-  const feature = model.features.find((candidate) => candidate.slug === slug);
+  const feature = read.model.features.find((candidate) => candidate.slug === slug);
   if (feature === undefined) {
     return <p role="alert">{slug} is not a Feature in this Project.</p>;
   }

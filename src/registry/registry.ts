@@ -1,6 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { isPlainObject, openConfigFile } from "../config/file.ts";
+import { ifExists } from "../fs.ts";
 
 export type Project = { path: string };
 
@@ -21,14 +22,8 @@ export function resolveProjectPath(cwd: string, target = "."): string {
 // different letter case on a case-insensitive file system is one Project.
 // Undefined when no folder is there: missing, under a file (ENOTDIR), or a
 // symlink loop (ELOOP).
-async function canonicalPath(projectPath: string): Promise<string | undefined> {
-  try {
-    return await realpath(projectPath);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") return undefined;
-    throw error;
-  }
+function canonicalPath(projectPath: string): Promise<string | undefined> {
+  return ifExists(realpath(projectPath));
 }
 
 // The Projects the dev has added, kept in the app's config file.
