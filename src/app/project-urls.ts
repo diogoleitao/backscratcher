@@ -16,6 +16,10 @@ export function projectHref(project: Project): string {
   return hrefFor(segmentsOf(project.path));
 }
 
+export function featureHref(project: Project, slug: string): string {
+  return `${projectHref(project)}?feature=${encodeURIComponent(slug)}`;
+}
+
 // Catch-all params arrive still percent-encoded. Next rejects a malformed
 // escape before the page runs.
 export function decodeSegments(segments: string[]): string[] {
