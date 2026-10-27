@@ -17,7 +17,7 @@ One directory inside a Project's tracker folder, grouping a Spec and its Tickets
 _Avoid_: Effort, epic
 
 **Spec**:
-The optional document describing what a Feature should achieve, from which its Tickets are cut.
+The document describing what a Feature should achieve, from which its Tickets are cut; a directory without one is not a Feature.
 _Avoid_: PRD, plan
 
 **Ticket**:
