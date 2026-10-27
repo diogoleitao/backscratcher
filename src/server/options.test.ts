@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveServerOptions } from "./options.js";
+import { resolveServerOptions } from "./options.ts";
 
 describe("resolveServerOptions", () => {
   it("defaults to port 4747 and opening the browser", () => {

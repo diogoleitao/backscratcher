@@ -7,10 +7,11 @@
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
+    "rewriteRelativeImportExtensions": true,
     "rootDir": "src",
     "outDir": "dist",
     "types": ["node"]
   },
-  "include": ["src/cli/**/*.ts", "src/server/**/*.ts", "src/config/**/*.ts"],
-  "exclude": ["**/*.test.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/app/**", "**/*.test.ts"]
 }

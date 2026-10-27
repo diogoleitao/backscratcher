@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { type ConfigError, isPlainObject, openConfigFile } from "./file.ts";
 
 export type Settings = {
   port?: number;
@@ -50,57 +50,30 @@ export function isSettingKey(key: string): key is SettingKey {
   return Object.hasOwn(SETTINGS, key);
 }
 
-export class ConfigError extends Error {}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-type ConfigFile = {
-  settings?: Record<string, unknown>;
-};
-
 export function openConfig(configPath: string) {
-  async function load(): Promise<ConfigFile> {
-    let text: string;
-    try {
-      text = await readFile(configPath, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-      throw error;
-    }
+  const file = openConfigFile(configPath);
+  const { save } = file;
 
-    let config: unknown;
-    try {
-      config = JSON.parse(text);
-    } catch {
-      throw new ConfigError(`config file ${configPath} is not valid JSON`);
+  async function load() {
+    const config = await file.load();
+    const settings = config.settings === undefined ? {} : config.settings;
+    if (!isPlainObject(settings)) {
+      throw file.error("settings must be a JSON object");
     }
-    if (!isPlainObject(config)) {
-      throw new ConfigError(`config file ${configPath} must hold a JSON object`);
-    }
-    if (config.settings !== undefined && !isPlainObject(config.settings)) {
-      throw new ConfigError(
-        `config file ${configPath}: settings must be a JSON object`,
-      );
-    }
-    return config as ConfigFile;
-  }
-
-  async function save(config: ConfigFile): Promise<void> {
-    await mkdir(path.dirname(configPath), { recursive: true });
-    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+    return { config, settings };
   }
 
   function invalid(key: SettingKey, value: unknown): ConfigError {
-    return new ConfigError(
-      `config file ${configPath}: invalid ${key} ${JSON.stringify(value)} (expected ${SETTINGS[key].expected})`,
+    return file.error(
+      `invalid ${key} ${JSON.stringify(value)} (expected ${SETTINGS[key].expected})`,
     );
   }
 
   return {
+    path: configPath,
+
     async settings(): Promise<Settings> {
-      const stored = (await load()).settings ?? {};
+      const stored = (await load()).settings;
       const settings: Record<string, unknown> = {};
       for (const key of Object.keys(SETTINGS) as SettingKey[]) {
         const value = stored[key];
@@ -113,14 +86,14 @@ export function openConfig(configPath: string) {
 
     async set(key: SettingKey, value: unknown): Promise<void> {
       if (!SETTINGS[key].accepts(value)) throw invalid(key, value);
-      const config = await load();
-      await save({ ...config, settings: { ...config.settings, [key]: value } });
+      const { config, settings } = await load();
+      await save({ ...config, settings: { ...settings, [key]: value } });
     },
 
     async unset(key: SettingKey): Promise<void> {
-      const config = await load();
-      const { [key]: _removed, ...settings } = config.settings ?? {};
-      await save({ ...config, settings });
+      const { config, settings } = await load();
+      const { [key]: _removed, ...kept } = settings;
+      await save({ ...config, settings: kept });
     },
   };
 }

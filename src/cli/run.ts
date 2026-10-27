@@ -1,22 +1,24 @@
 import { parseArgs } from "node:util";
 import {
-  ConfigError,
   isSettingKey,
   openConfig,
   resolveConfigPath,
   SETTINGS,
   type SettingKey,
   type Settings,
-} from "../config/config.js";
-import { PortInUseError } from "../server/errors.js";
-import { resolveServerOptions, type ServerOptions } from "../server/options.js";
+} from "../config/config.ts";
+import { ConfigError } from "../config/file.ts";
+import { openRegistry, RegistryError, resolveProjectPath } from "../registry/registry.ts";
+import { PortInUseError } from "../server/errors.ts";
+import { resolveServerOptions, type ServerOptions } from "../server/options.ts";
 
 export type CliDeps = {
   env: Record<string, string | undefined>;
   home: string;
+  cwd: string;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
-  startServer: (options: ServerOptions) => Promise<void>;
+  startServer: (options: ServerOptions & { configPath: string }) => Promise<void>;
 };
 
 type Config = ReturnType<typeof openConfig>;
@@ -47,7 +49,11 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       );
       return 1;
     }
-    if (error instanceof ConfigError || isSystemError(error)) {
+    if (
+      error instanceof ConfigError ||
+      error instanceof RegistryError ||
+      isSystemError(error)
+    ) {
       deps.stderr(`backscratcher: ${error.message}\n`);
       return 1;
     }
@@ -55,34 +61,41 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
   }
 }
 
+// One run of a command: the parsed flags, the arguments after the command
+// name, and the config file the flags and environment point at.
+type Invocation = {
+  args: Args;
+  operands: string[];
+  config: Config;
+  deps: CliDeps;
+};
+
+const COMMANDS: Record<string, (invocation: Invocation) => Promise<number>> = {
+  add: runAdd,
+  remove: runRemove,
+  config: runConfig,
+};
+
 async function dispatch(argv: string[], deps: CliDeps): Promise<number> {
   const args = parseCliArgs(argv);
-  const configPath = resolveConfigPath({
-    home: deps.home,
-    envPath: deps.env.BACKSCRATCHER_CONFIG,
-    flagPath: args.values.config,
-  });
-  const config = openConfig(configPath);
-  const [command, ...rest] = args.positionals;
+  const config = openConfig(
+    resolveConfigPath({
+      home: deps.home,
+      envPath: deps.env.BACKSCRATCHER_CONFIG,
+      flagPath: args.values.config,
+    }),
+  );
+  const [command, ...operands] = args.positionals;
+  const invocation = { args, operands, config, deps };
 
-  if (command === undefined) return runStart(config, args, deps);
-  if (command !== "config") {
+  if (command === undefined) return runStart(invocation);
+  if (!Object.hasOwn(COMMANDS, command)) {
     throw new UsageError(`unknown command "${command}"`);
   }
-
-  rejectFlags(args, ["port", "no-open"], "config");
-  const [key, value, ...extra] = rest;
-  if (extra.length > 0) {
-    throw new UsageError(`unexpected argument "${extra[0]}"`);
-  }
-  if (key === undefined) {
-    rejectFlags(args, ["unset"], "config without a setting");
-    return runConfigPrint(config, configPath, deps);
-  }
-  return runConfigSet(config, key, value, args.values.unset ?? false);
+  return COMMANDS[command](invocation);
 }
 
-async function runStart(config: Config, args: Args, deps: CliDeps): Promise<number> {
+async function runStart({ args, config, deps }: Invocation): Promise<number> {
   rejectFlags(args, ["unset"], "start");
   const port =
     args.values.port === undefined ? undefined : parseSetting("port", args.values.port);
@@ -90,17 +103,24 @@ async function runStart(config: Config, args: Args, deps: CliDeps): Promise<numb
     flags: { port, open: args.values["no-open"] ? false : undefined },
     settings: await config.settings(),
   });
-  await deps.startServer(options);
+  await deps.startServer({ ...options, configPath: config.path });
   return 0;
 }
 
-async function runConfigPrint(
-  config: Config,
-  configPath: string,
-  deps: CliDeps,
-): Promise<number> {
+async function runConfig({ args, operands, config, deps }: Invocation): Promise<number> {
+  rejectFlags(args, ["port", "no-open"], "config");
+  const [key, value, ...extra] = operands;
+  rejectExtra(extra);
+  if (key === undefined) {
+    rejectFlags(args, ["unset"], "config without a setting");
+    return runConfigPrint(config, deps);
+  }
+  return runConfigSet(config, key, value, args.values.unset ?? false);
+}
+
+async function runConfigPrint(config: Config, deps: CliDeps): Promise<number> {
   const settings = await config.settings();
-  const lines = [`config file: ${configPath}`];
+  const lines = [`config file: ${config.path}`];
   for (const key of Object.keys(SETTINGS) as SettingKey[]) {
     lines.push(`${key}: ${settings[key] ?? `${SETTINGS[key].default} (default)`}`);
   }
@@ -142,6 +162,34 @@ function parseSetting<K extends SettingKey>(
     );
   }
   return value;
+}
+
+async function runAdd(invocation: Invocation): Promise<number> {
+  const projectPath = parseProjectPath(invocation, "add");
+  const { path, added } = await openRegistry(invocation.config.path).add(projectPath);
+  invocation.deps.stdout(`${added ? "added" : "already registered"}: ${path}\n`);
+  return 0;
+}
+
+async function runRemove(invocation: Invocation): Promise<number> {
+  const projectPath = parseProjectPath(invocation, "remove");
+  const removed = await openRegistry(invocation.config.path).remove(projectPath);
+  invocation.deps.stdout(`removed: ${removed}\n`);
+  return 0;
+}
+
+// `add [path]` and `remove [path]`: the working directory when no path is given.
+function parseProjectPath({ args, operands, deps }: Invocation, command: string): string {
+  rejectFlags(args, ["port", "no-open", "unset"], command);
+  const [target, ...extra] = operands;
+  rejectExtra(extra);
+  return resolveProjectPath(deps.cwd, target);
+}
+
+function rejectExtra(extra: string[]): void {
+  if (extra.length > 0) {
+    throw new UsageError(`unexpected argument "${extra[0]}"`);
+  }
 }
 
 function rejectFlags(
