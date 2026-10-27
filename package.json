@@ -1,0 +1,39 @@
+{
+  "name": "backscratcher",
+  "version": "0.0.0",
+  "description": "A read-only visualizer for the local markdown issue tracker defined by Matt Pocock's skills.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "backscratcher": "dist/cli/main.js"
+  },
+  "files": [
+    "dist",
+    ".next",
+    "!.next/cache",
+    "next.config.mjs"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1 --port 4747",
+    "build": "next build && tsc -p tsconfig.cli.json",
+    "start": "node dist/cli/main.js",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.cli.json --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "next": "^16.4.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
