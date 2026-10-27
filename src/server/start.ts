@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import next from "next";
+import { PortInUseError } from "./errors.js";
 import type { ServerOptions } from "./options.js";
 
 const HOST = "127.0.0.1";
@@ -9,11 +10,6 @@ const HOST = "127.0.0.1";
 // namespace, but at runtime it is `module.exports`, which is the factory itself.
 const createNextServer = next as unknown as typeof next.default;
 
-export class PortInUseError extends Error {
-  constructor(readonly port: number) {
-    super(`port ${port} is already in use`);
-  }
-}
 
 export async function startServer(
   options: ServerOptions & { appDir: string; log: (text: string) => void },

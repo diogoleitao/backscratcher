@@ -8,7 +8,7 @@ export type Settings = {
 
 export type SettingKey = keyof Settings;
 
-type SettingSpec<T> = {
+type SettingDefinition<T> = {
   default: T;
   expected: string;
   fromText(text: string): T | undefined;
@@ -26,7 +26,7 @@ function isPort(value: unknown): value is number {
 
 // Every setting the config file and `backscratcher config` know about.
 export const SETTINGS: {
-  [K in SettingKey]-?: SettingSpec<NonNullable<Settings[K]>>;
+  [K in SettingKey]-?: SettingDefinition<NonNullable<Settings[K]>>;
 } = {
   port: {
     default: 4747,
@@ -52,6 +52,10 @@ export function isSettingKey(key: string): key is SettingKey {
 
 export class ConfigError extends Error {}
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 type ConfigFile = {
   settings?: Record<string, unknown>;
 };
@@ -72,8 +76,13 @@ export function openConfig(configPath: string) {
     } catch {
       throw new ConfigError(`config file ${configPath} is not valid JSON`);
     }
-    if (typeof config !== "object" || config === null || Array.isArray(config)) {
+    if (!isPlainObject(config)) {
       throw new ConfigError(`config file ${configPath} must hold a JSON object`);
+    }
+    if (config.settings !== undefined && !isPlainObject(config.settings)) {
+      throw new ConfigError(
+        `config file ${configPath}: settings must be a JSON object`,
+      );
     }
     return config as ConfigFile;
   }

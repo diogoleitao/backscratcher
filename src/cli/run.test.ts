@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { PortInUseError } from "../server/errors.js";
 import type { ServerOptions } from "../server/options.js";
 import { runCli } from "./run.js";
 
@@ -17,7 +18,11 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-async function cli(argv: string[], env: Record<string, string> = {}) {
+async function cli(
+  argv: string[],
+  env: Record<string, string> = {},
+  startError?: Error,
+) {
   let stdout = "";
   let stderr = "";
   const started: ServerOptions[] = [];
@@ -27,11 +32,44 @@ async function cli(argv: string[], env: Record<string, string> = {}) {
     stdout: (text) => (stdout += text),
     stderr: (text) => (stderr += text),
     startServer: async (options) => {
+      if (startError) throw startError;
       started.push(options);
     },
   });
   return { code, stdout, stderr, started };
 }
+
+function systemError(code: string, message: string): Error {
+  return Object.assign(new Error(message), { code });
+}
+
+describe("errors", () => {
+  it("reports a taken port with how to pick another, exiting 1", async () => {
+    const result = await cli([], {}, new PortInUseError(4747));
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(
+      "backscratcher: port 4747 is already in use. Stop whatever is using it, or start with --port <n> or set one with: backscratcher config port <n>\n",
+    );
+  });
+
+  it("reports a system error from the server as one line, exiting 1", async () => {
+    const result = await cli(
+      ["--port", "80"],
+      {},
+      systemError("EACCES", "listen EACCES: permission denied 127.0.0.1:80"),
+    );
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(
+      "backscratcher: listen EACCES: permission denied 127.0.0.1:80\n",
+    );
+  });
+
+  it("reports a config path that is a directory as one line, exiting 1", async () => {
+    const result = await cli(["config", "--config", dir]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/^backscratcher: EISDIR[^\n]*\n$/);
+  });
+});
 
 describe("backscratcher (start)", () => {
   it("starts with the defaults when nothing is configured", async () => {

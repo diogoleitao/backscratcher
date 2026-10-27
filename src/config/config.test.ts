@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -50,6 +50,20 @@ describe("openConfig", () => {
     await expect(read).rejects.toThrow(configPath);
     await expect(read).rejects.toThrow(/port.*"abc"/);
   });
+
+  it.each([['"ab"'], ["[1]"], ["null"]])(
+    "rejects settings that are %s instead of an object, without rewriting the file",
+    async (settings) => {
+      const contents = `{"settings":${settings}}`;
+      await writeConfigFile(contents);
+
+      await expect(openConfig(configPath).settings()).rejects.toThrow(ConfigError);
+      await expect(openConfig(configPath).set("port", 5050)).rejects.toThrow(
+        `config file ${configPath}: settings must be a JSON object`,
+      );
+      expect(await readFile(configPath, "utf8")).toBe(contents);
+    },
+  );
 
   it("rejects a file that is not valid JSON, naming the file", async () => {
     await writeConfigFile("{ not json");

@@ -8,6 +8,7 @@ import {
   type SettingKey,
   type Settings,
 } from "../config/config.js";
+import { PortInUseError } from "../server/errors.js";
 import { resolveServerOptions, type ServerOptions } from "../server/options.js";
 
 export type CliDeps = {
@@ -23,6 +24,15 @@ type Args = ReturnType<typeof parseCliArgs>;
 
 class UsageError extends Error {}
 
+// Node's errors from the file system and sockets (EISDIR, EACCES, ...).
+function isSystemError(error: unknown): error is NodeJS.ErrnoException {
+  return (
+    error instanceof Error &&
+    typeof (error as NodeJS.ErrnoException).code === "string" &&
+    /^E[A-Z]+$/.test((error as NodeJS.ErrnoException).code!)
+  );
+}
+
 export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
   try {
     return await dispatch(argv, deps);
@@ -31,7 +41,13 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.stderr(`backscratcher: ${error.message}\n`);
       return 2;
     }
-    if (error instanceof ConfigError) {
+    if (error instanceof PortInUseError) {
+      deps.stderr(
+        `backscratcher: ${error.message}. Stop whatever is using it, or start with --port <n> or set one with: backscratcher config port <n>\n`,
+      );
+      return 1;
+    }
+    if (error instanceof ConfigError || isSystemError(error)) {
       deps.stderr(`backscratcher: ${error.message}\n`);
       return 1;
     }
@@ -116,10 +132,10 @@ function parseSetting<K extends SettingKey>(
   text: string | undefined,
 ): NonNullable<Settings[K]> {
   // TypeScript can't correlate SETTINGS[key] with Settings[K] for a generic K.
-  const spec = SETTINGS[key] as {
+  const definition = SETTINGS[key] as {
     fromText(text: string): NonNullable<Settings[K]> | undefined;
   };
-  const value = text === undefined ? undefined : spec.fromText(text);
+  const value = text === undefined ? undefined : definition.fromText(text);
   if (value === undefined) {
     throw new UsageError(
       `invalid ${key} "${text ?? ""}" (expected ${SETTINGS[key].expected})`,
