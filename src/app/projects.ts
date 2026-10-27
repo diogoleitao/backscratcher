@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { resolveConfigPath } from "../config/config.ts";
+import { type ProjectModel, readProject } from "../project-reader/project-reader.ts";
 import { openRegistry, type Project } from "../registry/registry.ts";
 
 export type ProjectList = { projects: Project[] } | { error: string };
@@ -17,4 +18,8 @@ export async function listProjects(): Promise<ProjectList> {
   } catch (error) {
     return { error: (error as Error).message };
   }
+}
+
+export function readRegisteredProject(project: Project): Promise<ProjectModel> {
+  return readProject(project.path, { prLookup: async () => [] });
 }
