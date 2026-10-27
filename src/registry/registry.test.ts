@@ -13,7 +13,13 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openConfig } from "../config/config.ts";
 import { ConfigError } from "../config/file.ts";
-import { openRegistry, RegistryError, resolveProjectPath } from "./registry.ts";
+import {
+  AlreadyRegisteredError,
+  openRegistry,
+  type Registry,
+  RegistryError,
+  resolveProjectPath,
+} from "./registry.ts";
 
 let dir: string;
 let configPath: string;
@@ -174,6 +180,117 @@ describe("openRegistry", () => {
 
     expect(await openRegistry(configPath).remove(projectDir)).toBe(projectDir);
     expect(await openRegistry(configPath).list()).toEqual([]);
+  });
+
+  describe("Tracker folder override", () => {
+    it("sets a Project's override and persists it across instances", async () => {
+      await openRegistry(configPath).add(projectDir);
+
+      expect(await openRegistry(configPath).setTrackerFolder(projectDir, "docs/tickets")).toBe(
+        projectDir,
+      );
+      expect(await openRegistry(configPath).list()).toEqual([
+        { path: projectDir, trackerFolder: "docs/tickets" },
+      ]);
+    });
+
+    it("adds a Project with an override", async () => {
+      expect(
+        await openRegistry(configPath).add(projectDir, { trackerFolder: "docs/tickets" }),
+      ).toEqual({ path: projectDir, added: true });
+      expect(await openRegistry(configPath).list()).toEqual([
+        { path: projectDir, trackerFolder: "docs/tickets" },
+      ]);
+    });
+
+    it("rejects adding a registered Project with an override, keeping its override", async () => {
+      await openRegistry(configPath).add(projectDir, { trackerFolder: "kept" });
+
+      const again = openRegistry(configPath).add(projectDir, { trackerFolder: "docs/tickets" });
+      await expect(again).rejects.toThrow(AlreadyRegisteredError);
+      await expect(again).rejects.toThrow(`${projectDir} is already a registered Project`);
+      expect(await openRegistry(configPath).list()).toEqual([
+        { path: projectDir, trackerFolder: "kept" },
+      ]);
+    });
+
+    it("rejects adding a Project with an override outside it, without writing", async () => {
+      await expect(
+        openRegistry(configPath).add(projectDir, { trackerFolder: "../elsewhere" }),
+      ).rejects.toThrow(RegistryError);
+      await expect(access(configPath)).rejects.toThrow();
+    });
+
+    it("clears a Project's override, leaving the other Projects' overrides", async () => {
+      const other = path.join(dir, "projects", "other");
+      await mkdir(other);
+      await openRegistry(configPath).add(projectDir);
+      await openRegistry(configPath).add(other);
+      await openRegistry(configPath).setTrackerFolder(projectDir, "docs/tickets");
+      await openRegistry(configPath).setTrackerFolder(other, "tickets");
+
+      expect(await openRegistry(configPath).clearTrackerFolder(projectDir)).toBe(projectDir);
+
+      expect(await openRegistry(configPath).list()).toEqual([
+        { path: projectDir },
+        { path: other, trackerFolder: "tickets" },
+      ]);
+    });
+
+    it("accepts an override that stays inside the Project after normalising", async () => {
+      await openRegistry(configPath).add(projectDir);
+
+      await openRegistry(configPath).setTrackerFolder(projectDir, "docs/../tickets");
+
+      expect(await openRegistry(configPath).list()).toEqual([
+        { path: projectDir, trackerFolder: "docs/../tickets" },
+      ]);
+    });
+
+    it.each([
+      ["setting", (registry: Registry) => registry.setTrackerFolder(projectDir, "docs")],
+      ["clearing", (registry: Registry) => registry.clearTrackerFolder(projectDir)],
+    ])("rejects %s the override of a path that is not a registered Project", async (_, change) => {
+      await expect(change(openRegistry(configPath))).rejects.toThrow(
+        new RegistryError(`${projectDir} is not a registered Project`),
+      );
+      await expect(access(configPath)).rejects.toThrow();
+    });
+
+    it.each([[""], ["."], [".."], ["../elsewhere"], ["docs/../../elsewhere"], ["/etc"]])(
+      "rejects the override %j, which is not a folder inside the Project, without writing",
+      async (trackerFolder) => {
+        await openRegistry(configPath).add(projectDir);
+
+        await expect(
+          openRegistry(configPath).setTrackerFolder(projectDir, trackerFolder),
+        ).rejects.toThrow(
+          new RegistryError(
+            `invalid Tracker folder ${JSON.stringify(trackerFolder)} (expected a relative path to a folder inside the Project)`,
+          ),
+        );
+        expect(await openRegistry(configPath).list()).toEqual([{ path: projectDir }]);
+      },
+    );
+
+    it.each([['""'], ["1"], ["null"], ['"/etc"'], ['"../elsewhere"']])(
+      "rejects a stored override of %s, without rewriting the file",
+      async (trackerFolder) => {
+        const contents = `{"projects":[{"path":${JSON.stringify(projectDir)},"trackerFolder":${trackerFolder}}]}`;
+        await mkdir(path.dirname(configPath), { recursive: true });
+        await writeFile(configPath, contents);
+
+        await expect(openRegistry(configPath).list()).rejects.toThrow(
+          new ConfigError(
+            `config file ${configPath}: the trackerFolder of ${projectDir} must be a relative path to a folder inside the Project`,
+          ),
+        );
+        await expect(
+          openRegistry(configPath).setTrackerFolder(projectDir, "docs"),
+        ).rejects.toThrow(ConfigError);
+        expect(await readFile(configPath, "utf8")).toBe(contents);
+      },
+    );
   });
 
   it("rejects removing a path that is not a registered Project", async () => {

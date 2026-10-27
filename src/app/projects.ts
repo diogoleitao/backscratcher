@@ -8,15 +8,21 @@ export type ProjectList = { projects: Project[] } | { error: string };
 // The app's entry into the registry, reading the process environment the way
 // the CLI's main does. The CLI sets BACKSCRATCHER_CONFIG to the config file it
 // resolved; under `next dev` the env var or the default applies.
+export function appRegistry() {
+  return openRegistry(
+    resolveConfigPath({ home: homedir(), envPath: process.env.BACKSCRATCHER_CONFIG }),
+  );
+}
+
+export function errorMessage(error: unknown): string {
+  return (error as Error).message;
+}
+
 export async function listProjects(): Promise<ProjectList> {
-  const configPath = resolveConfigPath({
-    home: homedir(),
-    envPath: process.env.BACKSCRATCHER_CONFIG,
-  });
   try {
-    return { projects: await openRegistry(configPath).list() };
+    return { projects: await appRegistry().list() };
   } catch (error) {
-    return { error: (error as Error).message };
+    return { error: errorMessage(error) };
   }
 }
 
@@ -24,8 +30,13 @@ export async function readRegisteredProject(
   project: Project,
 ): Promise<{ model: ProjectModel } | { error: string }> {
   try {
-    return { model: await readProject(project.path, { prLookup: async () => [] }) };
+    return {
+      model: await readProject(project.path, {
+        trackerFolder: project.trackerFolder,
+        prLookup: async () => [],
+      }),
+    };
   } catch (error) {
-    return { error: (error as Error).message };
+    return { error: errorMessage(error) };
   }
 }

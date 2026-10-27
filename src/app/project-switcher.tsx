@@ -1,6 +1,7 @@
 import Link from "next/link";
 import path from "node:path";
 import type { Project } from "../registry/registry.ts";
+import { AddProjectForm, RemoveProjectButton } from "./project-forms.tsx";
 import { projectHref } from "./project-urls.ts";
 
 export function ProjectSwitcher({
@@ -23,9 +24,11 @@ export function ProjectSwitcher({
               {path.basename(project.path)}
             </Link>{" "}
             <small>{project.path}</small>
+            <RemoveProjectButton project={project} />
           </li>
         ))}
       </ul>
+      <AddProjectForm />
     </nav>
   );
 }

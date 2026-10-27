@@ -102,7 +102,7 @@ describe("readProject", () => {
     expect(model.skipped).toEqual(["odd"]);
   });
 
-  it("reads the Tracker folder the setting names, relative to the Project", async () => {
+  it("reads the overridden Tracker folder, relative to the Project, in place of .scratch/", async () => {
     const { projectPath, model } = await readFixture("custom-tracker-folder", "docs/tickets");
 
     expect(model).toEqual({

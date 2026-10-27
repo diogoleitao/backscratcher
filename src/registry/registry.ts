@@ -3,11 +3,41 @@ import path from "node:path";
 import { isPlainObject, openConfigFile } from "../config/file.ts";
 import { ifExists } from "../fs.ts";
 
-export type Project = { path: string };
+// trackerFolder overrides the Project's Tracker folder, relative to its folder.
+export type Project = { path: string; trackerFolder?: string };
+
+export type Registry = ReturnType<typeof openRegistry>;
 
 export class RegistryError extends Error {}
 
-function isProject(value: unknown): value is Project {
+export class AlreadyRegisteredError extends RegistryError {
+  constructor(readonly path: string) {
+    super(`${path} is already a registered Project`);
+  }
+}
+
+const TRACKER_FOLDER_RULE = "a relative path to a folder inside the Project";
+
+// The Tracker folder is a folder inside the Project, never the Project folder
+// itself. Checked on the text alone; a symlink inside the Project is followed.
+function isTrackerFolder(value: unknown): value is string {
+  if (typeof value !== "string" || value === "" || path.isAbsolute(value)) return false;
+  const normalized = path.normalize(value);
+  return normalized !== "." && normalized !== ".." && !normalized.startsWith(`..${path.sep}`);
+}
+
+function checkTrackerFolder(trackerFolder: string): void {
+  if (!isTrackerFolder(trackerFolder)) {
+    throw new RegistryError(
+      `invalid Tracker folder ${JSON.stringify(trackerFolder)} (expected ${TRACKER_FOLDER_RULE})`,
+    );
+  }
+}
+
+// A Project as stored, before its trackerFolder is checked.
+type StoredProject = { path: string; trackerFolder?: unknown };
+
+function isStoredProject(value: unknown): value is StoredProject {
   return (
     isPlainObject(value) && typeof value.path === "string" && path.isAbsolute(value.path)
   );
@@ -32,18 +62,42 @@ export function openRegistry(configPath: string) {
 
   async function load() {
     const config = await file.load();
-    const projects = config.projects === undefined ? [] : config.projects;
-    if (!Array.isArray(projects) || !projects.every(isProject)) {
+    const stored = config.projects === undefined ? [] : config.projects;
+    if (!Array.isArray(stored) || !stored.every(isStoredProject)) {
       throw file.error('projects must be a list of {"path": "<absolute path>"}');
     }
     const seen = new Set<string>();
-    for (const project of projects) {
+    for (const project of stored) {
       if (seen.has(project.path)) {
         throw file.error(`projects lists ${project.path} more than once`);
       }
+      if (project.trackerFolder !== undefined && !isTrackerFolder(project.trackerFolder)) {
+        throw file.error(`the trackerFolder of ${project.path} must be ${TRACKER_FOLDER_RULE}`);
+      }
       seen.add(project.path);
     }
-    return { config, projects };
+    // Every trackerFolder was checked above.
+    return { config, projects: stored as Project[] };
+  }
+
+  // Replaces a registered Project with what change makes of it. A Project
+  // whose folder is gone can still be changed by its stored path.
+  async function update(
+    projectPath: string,
+    change: (project: Project) => Project,
+  ): Promise<string> {
+    const canonical = (await canonicalPath(projectPath)) ?? projectPath;
+    const { config, projects } = await load();
+    if (!projects.some((project) => project.path === canonical)) {
+      throw new RegistryError(`${projectPath} is not a registered Project`);
+    }
+    await file.save({
+      ...config,
+      projects: projects.map((project) =>
+        project.path === canonical ? change(project) : project,
+      ),
+    });
+    return canonical;
   }
 
   return {
@@ -51,16 +105,25 @@ export function openRegistry(configPath: string) {
       return (await load()).projects;
     },
 
-    async add(projectPath: string): Promise<{ path: string; added: boolean }> {
+    // Adding a registered Project again is a no-op, unless it names an
+    // override: that is rejected rather than changing the Project.
+    async add(
+      projectPath: string,
+      { trackerFolder }: { trackerFolder?: string } = {},
+    ): Promise<{ path: string; added: boolean }> {
+      if (trackerFolder !== undefined) checkTrackerFolder(trackerFolder);
       const canonical = await canonicalPath(projectPath);
       if (canonical === undefined || !(await stat(canonical)).isDirectory()) {
         throw new RegistryError(`${projectPath} is not a directory`);
       }
       const { config, projects } = await load();
       if (projects.some((project) => project.path === canonical)) {
+        if (trackerFolder !== undefined) throw new AlreadyRegisteredError(canonical);
         return { path: canonical, added: false };
       }
-      await file.save({ ...config, projects: [...projects, { path: canonical }] });
+      const project: Project = { path: canonical };
+      if (trackerFolder !== undefined) project.trackerFolder = trackerFolder;
+      await file.save({ ...config, projects: [...projects, project] });
       return { path: canonical, added: true };
     },
 
@@ -74,6 +137,15 @@ export function openRegistry(configPath: string) {
       }
       await file.save({ ...config, projects: kept });
       return canonical;
+    },
+
+    async setTrackerFolder(projectPath: string, trackerFolder: string): Promise<string> {
+      checkTrackerFolder(trackerFolder);
+      return update(projectPath, (project) => ({ ...project, trackerFolder }));
+    },
+
+    async clearTrackerFolder(projectPath: string): Promise<string> {
+      return update(projectPath, ({ trackerFolder: _cleared, ...project }) => project);
     },
   };
 }

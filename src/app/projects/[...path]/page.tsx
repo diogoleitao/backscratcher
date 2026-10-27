@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { Project } from "../../../registry/registry.ts";
 import { FeaturePage } from "../../feature-page.tsx";
+import { TrackerFolderForm } from "../../project-forms.tsx";
 import { ProjectLevelPageView } from "../../project-level-page.tsx";
 import { ProjectOverview } from "../../project-overview.tsx";
 import { ProjectSwitcher } from "../../project-switcher.tsx";
@@ -33,6 +34,7 @@ export default async function ProjectPage({
         <section>
           <h2>{path.basename(project.path)}</h2>
           <p>{project.path}</p>
+          <TrackerFolderForm key={project.trackerFolder} project={project} />
           <ProjectContent project={project} feature={feature} ticket={ticket} page={page} />
         </section>
       ) : (
