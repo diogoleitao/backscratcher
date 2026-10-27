@@ -16,8 +16,16 @@ export function projectHref(project: Project): string {
   return hrefFor(segmentsOf(project.path));
 }
 
+function queryHref(project: Project, key: "feature" | "page", value: string): string {
+  return `${projectHref(project)}?${key}=${encodeURIComponent(value)}`;
+}
+
 export function featureHref(project: Project, slug: string): string {
-  return `${projectHref(project)}?feature=${encodeURIComponent(slug)}`;
+  return queryHref(project, "feature", slug);
+}
+
+export function pageHref(project: Project, pagePath: string): string {
+  return queryHref(project, "page", pagePath);
 }
 
 // Catch-all params arrive still percent-encoded. Next rejects a malformed

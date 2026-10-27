@@ -16,6 +16,10 @@ _Avoid_: Project list, bookmarks
 The folder inside a Project that holds its Features, `.scratch/` unless the dev overrides it.
 _Avoid_: Scratch folder, issues folder
 
+**Project-level page**:
+A markdown file belonging to the Project as a whole rather than to a Feature, shown on its own page: the glossary, an ADR, a loose file at the root of the Tracker folder, or an out-of-scope record.
+_Avoid_: Doc, project page
+
 **Feature**:
 One directory inside a Project's tracker folder, grouping a Spec and its Tickets under a slug.
 _Avoid_: Effort, epic

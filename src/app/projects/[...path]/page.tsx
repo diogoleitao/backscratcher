@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { Project } from "../../../registry/registry.ts";
 import { FeaturePage } from "../../feature-page.tsx";
+import { ProjectLevelPageView } from "../../project-level-page.tsx";
 import { ProjectOverview } from "../../project-overview.tsx";
 import { ProjectSwitcher } from "../../project-switcher.tsx";
 import { decodeSegments, findProject } from "../../project-urls.ts";
@@ -11,10 +12,10 @@ export default async function ProjectPage({
   searchParams,
 }: {
   params: Promise<{ path: string[] }>;
-  searchParams: Promise<{ feature?: string | string[] }>;
+  searchParams: Promise<{ feature?: string | string[]; page?: string | string[] }>;
 }) {
   const { path: rawSegments } = await params;
-  const { feature } = await searchParams;
+  const { feature, page } = await searchParams;
   const projectList = await listProjects();
   if ("error" in projectList) return <p role="alert">{projectList.error}</p>;
 
@@ -27,7 +28,7 @@ export default async function ProjectPage({
         <section>
           <h2>{path.basename(project.path)}</h2>
           <p>{project.path}</p>
-          <ProjectContent project={project} feature={feature} />
+          <ProjectContent project={project} feature={feature} page={page} />
         </section>
       ) : (
         <p role="alert">/{segments.join("/")} is not a registered Project.</p>
@@ -36,23 +37,45 @@ export default async function ProjectPage({
   );
 }
 
+function count(n: number, noun: string): string | undefined {
+  if (n === 0) return undefined;
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
 async function ProjectContent({
   project,
-  feature: slug,
+  feature,
+  page,
 }: {
   project: Project;
   feature?: string | string[];
+  page?: string | string[];
 }) {
-  if (Array.isArray(slug)) {
-    return <p role="alert">This URL names {slug.length} Features. Open one at a time.</p>;
+  const slugs = [feature ?? []].flat();
+  const pagePaths = [page ?? []].flat();
+  if (slugs.length + pagePaths.length > 1) {
+    const named = [count(slugs.length, "Feature"), count(pagePaths.length, "Project-level page")]
+      .filter(Boolean)
+      .join(" and ");
+    return <p role="alert">This URL names {named}. Open one at a time.</p>;
   }
+  const [slug] = slugs;
+  const [pagePath] = pagePaths;
   const read = await readRegisteredProject(project);
   if ("error" in read) return <p role="alert">{read.error}</p>;
+  if (pagePath) {
+    // Only paths the reader listed resolve, so the URL cannot reach other files.
+    const found = read.model.pages.find((candidate) => candidate.path === pagePath);
+    if (found === undefined) {
+      return <p role="alert">{pagePath} is not a Project-level page in this Project.</p>;
+    }
+    return <ProjectLevelPageView project={project} page={found} pages={read.model.pages} />;
+  }
   if (!slug) return <ProjectOverview project={project} model={read.model} />;
 
-  const feature = read.model.features.find((candidate) => candidate.slug === slug);
-  if (feature === undefined) {
+  const found = read.model.features.find((candidate) => candidate.slug === slug);
+  if (found === undefined) {
     return <p role="alert">{slug} is not a Feature in this Project.</p>;
   }
-  return <FeaturePage project={project} feature={feature} />;
+  return <FeaturePage project={project} feature={found} />;
 }
