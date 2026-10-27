@@ -1,4 +1,5 @@
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -59,6 +60,7 @@ describe("readProject", () => {
         {
           slug: "checkout",
           spec: { source: "# Checkout\n\nLet a shopper pay for the items in their cart.\n" },
+          tickets: [],
         },
       ],
       skipped: [],
@@ -105,7 +107,7 @@ describe("readProject", () => {
 
     expect(model).toEqual({
       trackerFolder: { path: path.join(projectPath, "docs", "tickets"), exists: true },
-      features: [{ slug: "billing", spec: { source: "# Billing\n" } }],
+      features: [{ slug: "billing", spec: { source: "# Billing\n" }, tickets: [] }],
       skipped: [],
       pages: [{ kind: "tracker", path: "docs/tickets/index.md", source: "# Tickets\n" }],
     });
@@ -223,6 +225,148 @@ describe("readProject", () => {
     });
   });
 
+  describe("Tickets", () => {
+    it("lists each Ticket with its number, title and Status, from bold and plain headers", async () => {
+      const { model } = await readFixture("ticket-headers");
+
+      expect(model.features[0].tickets).toEqual([
+        {
+          file: "01-cart-total.md",
+          number: 1,
+          title: "Show the cart total",
+          status: "ready-for-agent",
+          source:
+            "# 01: Show the cart total\n\n**Status:** ready-for-agent\n\n## What to build\n\nShow the sum of the items in the cart.\n",
+          warnings: [],
+        },
+        {
+          file: "02-card-payment.md",
+          number: 2,
+          title: "Pay by card",
+          status: "needs-triage",
+          source:
+            "# 02: Pay by card\n\nStatus: needs-triage\n\n## What to build\n\nTake a card payment for the cart total.\n",
+          warnings: [],
+        },
+      ]);
+    });
+
+    it("reads Status from the header only, in any case and with the colon outside the bold", async () => {
+      const { model } = await readFixture("ticket-header-variants");
+
+      expect(
+        model.features[0].tickets.map(({ number, status, warnings }) => ({
+          number,
+          status,
+          warnings,
+        })),
+      ).toEqual([
+        { number: 1, status: "wontfix", warnings: [] },
+        { number: 2, status: "ready-for-agent", warnings: [] },
+        { number: 3, status: undefined, warnings: [] },
+      ]);
+    });
+
+    it("takes the number from the filename and warns when the heading disagrees", async () => {
+      const { model } = await readFixture("ticket-heading-mismatch");
+
+      expect(model.features[0].tickets).toMatchObject([
+        {
+          number: 3,
+          title: "Refund a payment",
+          warnings: [{ kind: "heading-number-mismatch", heading: "04", filename: "03" }],
+        },
+      ]);
+    });
+
+    it("orders Tickets by number and ignores files without a number prefix", async () => {
+      const { model } = await readFixture("ticket-order");
+
+      expect(model.features[0].tickets.map((ticket) => ticket.file)).toEqual([
+        "9-delivery-slot.md",
+        "10-gift-wrap.md",
+      ]);
+    });
+
+    it("still lists a Ticket whose Status line is empty, with a warning", async () => {
+      const { model } = await readFixture("ticket-empty-status");
+
+      expect(model.features[0].tickets).toMatchObject([
+        {
+          number: 7,
+          title: "Apply a discount code",
+          status: undefined,
+          warnings: [{ kind: "status-line-empty" }],
+        },
+      ]);
+    });
+
+    it("warns about a heading without a number and ignores numbered headings below the header", async () => {
+      const { model } = await readFixture("ticket-heading-without-number");
+
+      expect(model.features[0].tickets).toMatchObject([
+        {
+          number: 4,
+          title: "refund",
+          warnings: [{ kind: "heading-without-number", heading: "Refund a payment" }],
+        },
+      ]);
+    });
+
+    it("falls back to the filename slug when there is no heading", async () => {
+      const { model } = await readFixture("ticket-no-heading");
+
+      expect(model.features[0].tickets).toMatchObject([
+        { number: 5, title: "guest-checkout", status: "ready-for-human", warnings: [] },
+      ]);
+    });
+
+    it("tolerates acceptance criteria written twice and keeps the whole file", async () => {
+      const { projectPath, model } = await readFixture("ticket-duplicated-criteria");
+      const file = path.join(projectPath, ".scratch", "checkout", "issues", "02-receipt.md");
+
+      expect(model.features[0].tickets).toEqual([
+        {
+          file: "02-receipt.md",
+          number: 2,
+          title: "Email a receipt",
+          status: "ready-for-agent",
+          source: await readFile(file, "utf8"),
+          warnings: [],
+        },
+      ]);
+    });
+  });
+
+  describe("with an unreadable Ticket file", () => {
+    let dir: string;
+
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it("still lists the Ticket, with a warning naming the problem", async () => {
+      dir = await realpath(await mkdtemp(path.join(tmpdir(), "backscratcher-reader-")));
+      const issuesPath = path.join(dir, ".scratch", "checkout", "issues");
+      await mkdir(issuesPath, { recursive: true });
+      await writeFile(path.join(dir, ".scratch", "checkout", "spec.md"), "# Checkout\n");
+      await writeFile(path.join(issuesPath, "06-locked.md"), "# 06: Locked\n");
+      await chmod(path.join(issuesPath, "06-locked.md"), 0o000);
+
+      const model = await readProject(dir, { prLookup: noPrs });
+
+      expect(model.features[0].tickets).toMatchObject([
+        {
+          file: "06-locked.md",
+          number: 6,
+          title: "locked",
+          source: "",
+          warnings: [{ kind: "unreadable", message: expect.stringContaining("EACCES") }],
+        },
+      ]);
+    });
+  });
+
   describe("with symlinks in the Tracker folder", () => {
     let dir: string;
 
@@ -242,7 +386,9 @@ describe("readProject", () => {
 
       const { model } = await readUntouched(projectPath, { root: dir });
 
-      expect(model.features).toEqual([{ slug: "search", spec: { source: "# Search\n" } }]);
+      expect(model.features).toEqual([
+        { slug: "search", spec: { source: "# Search\n" }, tickets: [] },
+      ]);
       expect(model.skipped).toEqual([]);
     });
 

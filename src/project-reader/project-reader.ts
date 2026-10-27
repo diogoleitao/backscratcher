@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { ifExists } from "../fs.ts";
+import { readTickets, type Ticket } from "./ticket.ts";
 
 export type PullRequestRef = { repo: string; number: number };
 
@@ -12,7 +13,9 @@ export type PullRequest = PullRequestRef & {
 
 export type PrLookup = (refs: PullRequestRef[]) => Promise<PullRequest[]>;
 
-export type Feature = { slug: string; spec: { source: string } };
+export type { Ticket, TicketWarning } from "./ticket.ts";
+
+export type Feature = { slug: string; spec: { source: string }; tickets: Ticket[] };
 
 export type ProjectLevelPageKind = "glossary" | "adr" | "tracker" | "out-of-scope";
 
@@ -84,7 +87,7 @@ export async function readProject(
     if (!(await ifExists(stat(directory)))?.isDirectory()) continue;
     const spec = await readFileIfPresent(path.join(directory, "spec.md"));
     if (spec !== undefined) {
-      features.push({ slug, spec: { source: spec } });
+      features.push({ slug, spec: { source: spec }, tickets: await readTickets(directory) });
     } else {
       skipped.push(slug);
     }
