@@ -1,17 +1,22 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PortInUseError } from "../server/errors.js";
-import type { ServerOptions } from "../server/options.js";
-import { runCli } from "./run.js";
+import { openRegistry } from "../registry/registry.ts";
+import { PortInUseError } from "../server/errors.ts";
+import type { ServerOptions } from "../server/options.ts";
+import { runCli } from "./run.ts";
 
 let dir: string;
 let configPath: string;
+let projectDir: string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(path.join(tmpdir(), "backscratcher-cli-"));
+  // Real path, so expected paths match the registry's canonical ones.
+  dir = await realpath(await mkdtemp(path.join(tmpdir(), "backscratcher-cli-")));
   configPath = path.join(dir, "config.json");
+  projectDir = path.join(dir, "project");
+  await mkdir(projectDir);
 });
 
 afterEach(async () => {
@@ -26,17 +31,20 @@ async function cli(
   let stdout = "";
   let stderr = "";
   const started: ServerOptions[] = [];
+  const configPaths: string[] = [];
   const code = await runCli(argv, {
     env,
     home: path.join(dir, "home"),
+    cwd: projectDir,
     stdout: (text) => (stdout += text),
     stderr: (text) => (stderr += text),
-    startServer: async (options) => {
+    startServer: async ({ configPath, ...options }) => {
       if (startError) throw startError;
       started.push(options);
+      configPaths.push(configPath);
     },
   });
-  return { code, stdout, stderr, started };
+  return { code, stdout, stderr, started, configPaths };
 }
 
 function systemError(code: string, message: string): Error {
@@ -85,6 +93,13 @@ describe("backscratcher (start)", () => {
     expect((await cli(["--port", "6060"], env)).started).toEqual([
       { port: 6060, open: false },
     ]);
+  });
+
+  it("gives the server the config file in use", async () => {
+    expect((await cli([])).configPaths).toEqual([
+      path.join(dir, "home", ".config", "backscratcher", "config.json"),
+    ]);
+    expect((await cli(["--config", configPath])).configPaths).toEqual([configPath]);
   });
 
   it("--no-open overrides a configured open", async () => {
@@ -174,5 +189,58 @@ describe("backscratcher config", () => {
     expect((await cli(["config", "--config", configPath])).stdout).toContain(
       "port: 4747 (default)\nopen: true (default)",
     );
+  });
+});
+
+describe("backscratcher add and remove", () => {
+  const projects = () => openRegistry(configPath).list();
+
+  it("adds the current directory, then reports it as already registered", async () => {
+    const first = await cli(["add", "--config", configPath]);
+    expect(first).toMatchObject({ code: 0, stdout: `added: ${projectDir}\n` });
+
+    const again = await cli(["add", "--config", configPath]);
+    expect(again).toMatchObject({ code: 0, stdout: `already registered: ${projectDir}\n` });
+    expect(await projects()).toEqual([{ path: projectDir }]);
+  });
+
+  it("adds a relative path as an absolute path", async () => {
+    await mkdir(path.join(projectDir, "nested"));
+
+    const result = await cli(["add", "nested", "--config", configPath]);
+    expect(result.stdout).toBe(`added: ${path.join(projectDir, "nested")}\n`);
+    expect(await projects()).toEqual([{ path: path.join(projectDir, "nested") }]);
+  });
+
+  it("removes the current directory", async () => {
+    await cli(["add", "--config", configPath]);
+
+    const result = await cli(["remove", "--config", configPath]);
+    expect(result).toMatchObject({ code: 0, stdout: `removed: ${projectDir}\n` });
+    expect(await projects()).toEqual([]);
+  });
+
+  it.each([
+    [["add", "missing"], `${path.join("<projectDir>", "missing")} is not a directory`],
+    [["remove", "missing"], `${path.join("<projectDir>", "missing")} is not a registered Project`],
+  ])("reports %j as one line, exiting 1", async (argv, message) => {
+    const result = await cli([...argv, "--config", configPath]);
+    expect(result).toMatchObject({
+      code: 1,
+      stderr: `backscratcher: ${message.replace("<projectDir>", projectDir)}\n`,
+    });
+  });
+
+  it.each([
+    [["add", "a", "b"]],
+    [["remove", "a", "b"]],
+    [["add", "--port", "5000"]],
+    [["remove", "--no-open"]],
+    [["add", "--unset"]],
+  ])("rejects %j without changing the Projects", async (argv) => {
+    const result = await cli([...argv, "--config", configPath]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).not.toBe("");
+    expect(await projects()).toEqual([]);
   });
 });

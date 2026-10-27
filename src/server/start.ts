@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import next from "next";
-import { PortInUseError } from "./errors.js";
-import type { ServerOptions } from "./options.js";
+import { PortInUseError } from "./errors.ts";
+import type { ServerOptions } from "./options.ts";
 
 const HOST = "127.0.0.1";
 

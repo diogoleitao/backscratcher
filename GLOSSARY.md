@@ -8,6 +8,10 @@ A read-only visualizer for the local markdown issue tracker defined by Matt Poco
 A folder the dev has added to the app, usually a repo root, whose tickets the app displays.
 _Avoid_: Workspace, repo
 
+**Project registry**:
+The list of Projects the dev has added, kept in the app's own config file, each by the real absolute path of its folder.
+_Avoid_: Project list, bookmarks
+
 **Tracker folder**:
 The folder inside a Project that holds its Features, `.scratch/` unless the dev overrides it.
 _Avoid_: Scratch folder, issues folder

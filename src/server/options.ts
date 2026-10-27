@@ -1,4 +1,4 @@
-import { SETTINGS, type Settings } from "../config/config.js";
+import { SETTINGS, type Settings } from "../config/config.ts";
 
 export type ServerOptions = Required<Settings>;
 
