@@ -37,7 +37,13 @@ export async function startServer(
   });
 
   ready = app.prepare();
-  await ready;
+  try {
+    await ready;
+  } catch (error) {
+    // Without this the open socket keeps the process alive after the error.
+    server.close();
+    throw error;
+  }
 
   const url = `http://${HOST}:${options.port}`;
   log(`backscratcher running at ${url}\n`);
