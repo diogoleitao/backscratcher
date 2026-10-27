@@ -13,7 +13,7 @@ export default async function ProjectPage({
   if ("error" in projectList) return <p role="alert">{projectList.error}</p>;
 
   const segments = decodeSegments(rawSegments);
-  const project = segments && findProject(projectList.projects, segments);
+  const project = findProject(projectList.projects, segments);
   return (
     <>
       <ProjectSwitcher projects={projectList.projects} current={project} />
@@ -24,7 +24,7 @@ export default async function ProjectPage({
           <p>No Features to show yet.</p>
         </section>
       ) : (
-        <p role="alert">/{(segments ?? rawSegments).join("/")} is not a registered Project.</p>
+        <p role="alert">/{segments.join("/")} is not a registered Project.</p>
       )}
     </>
   );

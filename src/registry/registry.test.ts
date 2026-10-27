@@ -100,6 +100,39 @@ describe("openRegistry", () => {
     },
   );
 
+  it("rejects adding a path under a file or through a symlink loop", async () => {
+    await writeFile(path.join(dir, "file.txt"), "");
+    await symlink(path.join(dir, "loop"), path.join(dir, "loop"));
+
+    for (const target of [path.join(dir, "file.txt", "sub"), path.join(dir, "loop")]) {
+      await expect(openRegistry(configPath).add(target)).rejects.toThrow(
+        new RegistryError(`${target} is not a directory`),
+      );
+    }
+  });
+
+  it("removes a Project whose parent folder became a file", async () => {
+    const parent = path.join(dir, "projects");
+    await openRegistry(configPath).add(projectDir);
+    await rm(parent, { recursive: true });
+    await writeFile(parent, "");
+
+    expect(await openRegistry(configPath).remove(projectDir)).toBe(projectDir);
+    expect(await openRegistry(configPath).list()).toEqual([]);
+  });
+
+  it("rejects a config file that lists a Project twice, without rewriting it", async () => {
+    const contents = JSON.stringify({ projects: [{ path: projectDir }, { path: projectDir }] });
+    await mkdir(path.dirname(configPath), { recursive: true });
+    await writeFile(configPath, contents);
+
+    await expect(openRegistry(configPath).list()).rejects.toThrow(
+      new ConfigError(`config file ${configPath}: projects lists ${projectDir} more than once`),
+    );
+    await expect(openRegistry(configPath).add(projectDir)).rejects.toThrow(ConfigError);
+    expect(await readFile(configPath, "utf8")).toBe(contents);
+  });
+
   it.each([['"ab"'], ["null"], ["{}"], ["[1]"], ['[{"path":1}]'], ['[{"path":"relative"}]']])(
     "rejects projects that are %s, without rewriting the file",
     async (projects) => {

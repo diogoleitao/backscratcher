@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ifExists } from "../fs.ts";
 
@@ -32,9 +32,21 @@ export function openConfigFile(configPath: string) {
       return config;
     },
 
+    // Writes a temp file beside the config file, then renames it over, so a
+    // reader never sees a half-written file. A symlinked config file is
+    // written at its target, keeping the link. Two writers at once can still
+    // lose one write: the last rename wins.
     async save(config: ConfigFile): Promise<void> {
-      await mkdir(path.dirname(configPath), { recursive: true });
-      await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      const target = (await ifExists(realpath(configPath))) ?? configPath;
+      await mkdir(path.dirname(target), { recursive: true });
+      const temp = `${target}.${process.pid}.tmp`;
+      try {
+        await writeFile(temp, `${JSON.stringify(config, null, 2)}\n`);
+        await rename(temp, target);
+      } catch (error) {
+        await rm(temp, { force: true });
+        throw error;
+      }
     },
 
     error(message: string): ConfigError {

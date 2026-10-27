@@ -1,4 +1,13 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -65,6 +74,20 @@ describe("openConfig", () => {
       expect(await readFile(configPath, "utf8")).toBe(contents);
     },
   );
+
+  it("writes through a symlinked config file, keeping the link", async () => {
+    const target = path.join(dir, "dotfiles", "config.json");
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, "{}");
+    await mkdir(path.dirname(configPath), { recursive: true });
+    await symlink(target, configPath);
+
+    await openConfig(configPath).set("port", 5050);
+
+    expect((await lstat(configPath)).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(await readFile(target, "utf8"))).toEqual({ settings: { port: 5050 } });
+    expect(await readdir(path.dirname(target))).toEqual(["config.json"]);
+  });
 
   it("rejects a file that is not valid JSON, naming the file", async () => {
     await writeConfigFile("{ not json");
