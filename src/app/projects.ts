@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { resolveConfigPath } from "../config/config.ts";
 import { type ProjectModel, readProject } from "../project-reader/project-reader.ts";
+import { watchProject } from "../project-watcher/project-watcher.ts";
 import { openRegistry, type Project } from "../registry/registry.ts";
 
 export type ProjectList = { projects: Project[] } | { error: string };
@@ -20,12 +22,27 @@ export async function listProjects(): Promise<ProjectList> {
   }
 }
 
-export async function readRegisteredProject(
-  project: Project,
-): Promise<{ model: ProjectModel } | { error: string }> {
+export type ProjectRead = { model: ProjectModel } | { error: string };
+
+// The read and the watch of a registered Project live together so they always
+// agree on its Tracker folder.
+export async function readRegisteredProject(project: Project): Promise<ProjectRead> {
   try {
     return { model: await readProject(project.path, { prLookup: async () => [] }) };
   } catch (error) {
     return { error: (error as Error).message };
   }
+}
+
+export function watchRegisteredProject(
+  project: Project,
+  onChange: () => void,
+): Promise<() => void> {
+  return watchProject(project.path, {}, onChange);
+}
+
+// Identifies what a read returned, so a page rendered from it can tell the
+// server which version it shows.
+export function versionOf(read: ProjectRead): string {
+  return createHash("sha1").update(JSON.stringify(read)).digest("hex");
 }

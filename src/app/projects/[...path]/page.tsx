@@ -1,11 +1,17 @@
 import path from "node:path";
 import type { Project } from "../../../registry/registry.ts";
 import { FeaturePage } from "../../feature-page.tsx";
+import { LiveUpdates } from "../../live-updates.tsx";
 import { ProjectLevelPageView } from "../../project-level-page.tsx";
 import { ProjectOverview } from "../../project-overview.tsx";
 import { ProjectSwitcher } from "../../project-switcher.tsx";
-import { decodeSegments, findProject } from "../../project-urls.ts";
-import { listProjects, readRegisteredProject } from "../../projects.ts";
+import { decodeSegments, eventsHref, findProject } from "../../project-urls.ts";
+import {
+  listProjects,
+  type ProjectRead,
+  readRegisteredProject,
+  versionOf,
+} from "../../projects.ts";
 
 export default async function ProjectPage({
   params,
@@ -21,14 +27,18 @@ export default async function ProjectPage({
 
   const segments = decodeSegments(rawSegments);
   const project = findProject(projectList.projects, segments);
+  // One read renders the page and names its version, so live updates catch
+  // any change made after it.
+  const read = project && (await readRegisteredProject(project));
   return (
     <>
       <ProjectSwitcher projects={projectList.projects} current={project} />
-      {project ? (
+      {project && read ? (
         <section>
+          <LiveUpdates href={eventsHref(project, versionOf(read))} />
           <h2>{path.basename(project.path)}</h2>
           <p>{project.path}</p>
-          <ProjectContent project={project} feature={feature} page={page} />
+          <ProjectContent project={project} read={read} feature={feature} page={page} />
         </section>
       ) : (
         <p role="alert">/{segments.join("/")} is not a registered Project.</p>
@@ -42,12 +52,14 @@ function count(n: number, noun: string): string | undefined {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
-async function ProjectContent({
+function ProjectContent({
   project,
+  read,
   feature,
   page,
 }: {
   project: Project;
+  read: ProjectRead;
   feature?: string | string[];
   page?: string | string[];
 }) {
@@ -61,7 +73,6 @@ async function ProjectContent({
   }
   const [slug] = slugs;
   const [pagePath] = pagePaths;
-  const read = await readRegisteredProject(project);
   if ("error" in read) return <p role="alert">{read.error}</p>;
   if (pagePath) {
     // Only paths the reader listed resolve, so the URL cannot reach other files.

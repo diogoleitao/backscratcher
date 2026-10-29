@@ -16,6 +16,12 @@ export function projectHref(project: Project): string {
   return hrefFor(segmentsOf(project.path));
 }
 
+// The Project's server-sent events, for a page showing the given version.
+export function eventsHref(project: Project, version: string): string {
+  const segments = segmentsOf(project.path).map(encodeURIComponent).join("/");
+  return `/events/${segments}?version=${version}`;
+}
+
 function queryHref(project: Project, key: "feature" | "page", value: string): string {
   return `${projectHref(project)}?${key}=${encodeURIComponent(value)}`;
 }

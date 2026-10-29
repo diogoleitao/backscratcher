@@ -51,10 +51,38 @@ async function readFileIfPresent(filePath: string): Promise<string | undefined> 
   return readFile(filePath, "utf8");
 }
 
-async function readPages(projectPath: string, trackerPath: string): Promise<ProjectLevelPage[]> {
+function resolveTrackerPath(projectPath: string, trackerFolder = ".scratch"): string {
+  return path.resolve(projectPath, trackerFolder);
+}
+
+// Each kind of Project-level page with its source, in pageSources order.
+function pageSourceEntries(projectPath: string, trackerPath: string) {
   const trackerFolder = path.relative(projectPath, trackerPath).split(path.sep).join("/") || ".";
+  return Object.entries(pageSources(trackerFolder)) as [ProjectLevelPageKind, PageSource][];
+}
+
+export type WatchedFolder = { path: string; recursive: boolean };
+
+// The folders whose contents readProject reads: everything under the Tracker
+// folder, and the entries directly inside each Project-level page folder.
+export function watchedFolders(
+  projectPath: string,
+  options: { trackerFolder?: string },
+): WatchedFolder[] {
+  const trackerPath = resolveTrackerPath(projectPath, options.trackerFolder);
+  const folders: WatchedFolder[] = [{ path: trackerPath, recursive: true }];
+  for (const [, { folder }] of pageSourceEntries(projectPath, trackerPath)) {
+    const folderPath = path.resolve(projectPath, folder);
+    if (!folders.some((watched) => watched.path === folderPath)) {
+      folders.push({ path: folderPath, recursive: false });
+    }
+  }
+  return folders;
+}
+
+async function readPages(projectPath: string, trackerPath: string): Promise<ProjectLevelPage[]> {
   const pages: ProjectLevelPage[] = [];
-  const sources = Object.entries(pageSources(trackerFolder)) as [ProjectLevelPageKind, PageSource][];
+  const sources = pageSourceEntries(projectPath, trackerPath);
   for (const [kind, { folder, accepts }] of sources) {
     const names = (await ifExists(readdir(path.join(projectPath, folder)))) ?? [];
     for (const name of names.filter(accepts).sort((a, b) => a.localeCompare(b))) {
@@ -71,7 +99,7 @@ export async function readProject(
   projectPath: string,
   options: { trackerFolder?: string; prLookup: PrLookup },
 ): Promise<ProjectModel> {
-  const trackerPath = path.resolve(projectPath, options.trackerFolder ?? ".scratch");
+  const trackerPath = resolveTrackerPath(projectPath, options.trackerFolder);
   const pages = await readPages(projectPath, trackerPath);
   const entries = await ifExists(readdir(trackerPath));
   if (entries === undefined) {
