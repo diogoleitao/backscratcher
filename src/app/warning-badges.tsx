@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { TicketWarning } from "../project-reader/project-reader.ts";
 
 function describe(warning: TicketWarning): string {
@@ -14,5 +15,10 @@ function describe(warning: TicketWarning): string {
 }
 
 export function WarningBadges({ warnings }: { warnings: TicketWarning[] }) {
-  return warnings.map((warning, index) => <mark key={index}>⚠ {describe(warning)}</mark>);
+  return warnings.map((warning, index) => (
+    <Fragment key={index}>
+      {index > 0 && " "}
+      <mark>⚠ {describe(warning)}</mark>
+    </Fragment>
+  ));
 }

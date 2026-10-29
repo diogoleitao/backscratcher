@@ -345,7 +345,11 @@ describe("readProject", () => {
       await rm(dir, { recursive: true, force: true });
     });
 
-    it("still lists the Ticket, with a warning naming the problem", async () => {
+    // chmod 000 does not block reads on Windows, where it only sets the
+    // read-only bit, or for root, which ignores file modes.
+    const modesBlockReads = process.platform !== "win32" && process.getuid?.() !== 0;
+
+    it.skipIf(!modesBlockReads)("still lists the Ticket, with a warning naming the problem", async () => {
       dir = await realpath(await mkdtemp(path.join(tmpdir(), "backscratcher-reader-")));
       const issuesPath = path.join(dir, ".scratch", "checkout", "issues");
       await mkdir(issuesPath, { recursive: true });
