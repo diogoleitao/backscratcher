@@ -19,7 +19,7 @@ export type Ticket = {
 
 const TICKET_FILE = /^(\d+)-(.+)\.md$/;
 const HEADING = /^# (.+)$/m;
-const NUMBERED_TITLE = /^(\d+): (.+)$/;
+const NUMBERED_TITLE = /^(\d+):\s*(.*)$/;
 const STATUS_LINE = /^(?:\*\*status:\*\*|\*\*status\*\*:|status:)[ \t]*(.*)$/im;
 
 type TicketName = { file: string; number: string; slug: string };
@@ -47,7 +47,7 @@ function parseTicket({ file, number, slug }: TicketName, source: string): Ticket
   return {
     file,
     number: Number(number),
-    title: numbered ? numbered[2].trim() : slug,
+    title: numbered?.[2].trim() || slug,
     status: status || undefined,
     source,
     warnings,

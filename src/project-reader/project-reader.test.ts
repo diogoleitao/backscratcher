@@ -313,6 +313,22 @@ describe("readProject", () => {
       ]);
     });
 
+    it("reads a numbered heading without a space after the colon, or without a title", async () => {
+      const { model } = await readFixture("ticket-heading-spacing");
+
+      expect(
+        model.features[0].tickets.map(({ number, title, warnings }) => ({ number, title, warnings })),
+      ).toEqual([
+        { number: 3, title: "Refund a payment", warnings: [] },
+        { number: 4, title: "store-credit", warnings: [] },
+        {
+          number: 5,
+          title: "Pay with a gift card",
+          warnings: [{ kind: "heading-number-mismatch", heading: "07", filename: "05" }],
+        },
+      ]);
+    });
+
     it("falls back to the filename slug when there is no heading", async () => {
       const { model } = await readFixture("ticket-no-heading");
 
