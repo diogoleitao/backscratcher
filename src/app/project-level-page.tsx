@@ -16,9 +16,16 @@ export function ProjectLevelPageView({
 }) {
   // A relative link to another listed Project-level page, such as one ADR
   // citing another, opens that page in the app. A leading `/` means the
-  // Project root.
+  // Project root. The URL arrives percent-encoded, so the file part is decoded
+  // to match page paths; a malformed escape matches no page.
   const linkToPage = (url: string) => {
-    const [file, fragment] = url.split("#", 2);
+    const [encoded, fragment] = url.split("#", 2);
+    let file: string;
+    try {
+      file = decodeURIComponent(encoded);
+    } catch {
+      return undefined;
+    }
     const target = file.startsWith("/")
       ? path.posix.normalize(file.slice(1))
       : path.posix.join(path.posix.dirname(page.path), file);
