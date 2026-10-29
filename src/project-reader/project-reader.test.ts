@@ -62,6 +62,7 @@ describe("readProject", () => {
         },
       ],
       skipped: [],
+      pages: [],
     });
   });
 
@@ -106,6 +107,7 @@ describe("readProject", () => {
       trackerFolder: { path: path.join(projectPath, "docs", "tickets"), exists: true },
       features: [{ slug: "billing", spec: { source: "# Billing\n" } }],
       skipped: [],
+      pages: [{ kind: "tracker", path: "docs/tickets/index.md", source: "# Tickets\n" }],
     });
   });
 
@@ -116,6 +118,7 @@ describe("readProject", () => {
       trackerFolder: { path: path.join(projectPath, ".scratch"), exists: false },
       features: [],
       skipped: [],
+      pages: [],
     });
   });
 
@@ -124,6 +127,100 @@ describe("readProject", () => {
 
     expect(model.trackerFolder.exists).toBe(false);
     expect(model.features).toEqual([]);
+  });
+
+  describe("Project-level pages", () => {
+    it("lists the Project's GLOSSARY.md, even without a Tracker folder", async () => {
+      const { model } = await readFixture("glossary");
+
+      expect(model.pages).toEqual([
+        {
+          kind: "glossary",
+          path: "GLOSSARY.md",
+          source: "# Shop\n\n**Cart**:\nThe items a shopper intends to buy.\n",
+        },
+      ]);
+    });
+
+    it("lists each markdown ADR in docs/adr/ in name order", async () => {
+      const { model } = await readFixture("adrs");
+
+      expect(model.pages).toEqual([
+        {
+          kind: "adr",
+          path: "docs/adr/0001-event-sourced-orders.md",
+          source: "# Event-sourced orders\n",
+        },
+        {
+          kind: "adr",
+          path: "docs/adr/0002-stripe-for-payments.md",
+          source: "# Stripe for payments\n",
+        },
+      ]);
+    });
+
+    it("lists markdown files at the root of the Tracker folder, not Specs or other files", async () => {
+      const { model } = await readFixture("tracker-root-markdown");
+
+      expect(model.pages).toEqual([
+        {
+          kind: "tracker",
+          path: ".scratch/README.md",
+          source: "# Tracker index\n\nStart with checkout.\n",
+        },
+      ]);
+      expect(model.features.map((feature) => feature.slug)).toEqual(["checkout"]);
+    });
+
+    it("lists the markdown files in the Project's .out-of-scope/ folder", async () => {
+      const { model } = await readFixture("out-of-scope");
+
+      expect(model.pages).toEqual([
+        {
+          kind: "out-of-scope",
+          path: ".out-of-scope/dark-mode.md",
+          source: "# Dark mode\n\nRejected: the shop follows the system theme.\n",
+        },
+      ]);
+    });
+
+    it("lists no pages from docs/adr/ and .out-of-scope/ folders without markdown", async () => {
+      const { model } = await readFixture("empty-page-folders");
+
+      expect(model.pages).toEqual([]);
+    });
+
+    it("lists each file once when the Tracker folder is the Project root", async () => {
+      const { model } = await readFixture("tracker-at-project-root", ".");
+
+      expect(model.pages).toEqual([
+        { kind: "glossary", path: "GLOSSARY.md", source: "# Shop\n" },
+        { kind: "tracker", path: "README.md", source: "# Shop tickets\n" },
+      ]);
+      expect(model.features.map((feature) => feature.slug)).toEqual(["checkout"]);
+    });
+
+    it("lists each ADR once when the Tracker folder is docs/adr", async () => {
+      const { model } = await readFixture("adrs", "docs/adr");
+
+      expect(model.pages.map(({ kind, path }) => ({ kind, path }))).toEqual([
+        { kind: "adr", path: "docs/adr/0001-event-sourced-orders.md" },
+        { kind: "adr", path: "docs/adr/0002-stripe-for-payments.md" },
+      ]);
+    });
+
+    it("lists root markdown of a Tracker folder outside the Project by its relative path", async () => {
+      const root = path.join(fixtures, "tracker-outside-project");
+      const { model } = await readUntouched(path.join(root, "project"), {
+        trackerFolder: "../tickets",
+        root,
+      });
+
+      expect(model.pages).toEqual([
+        { kind: "glossary", path: "GLOSSARY.md", source: "# Shop\n" },
+        { kind: "tracker", path: "../tickets/README.md", source: "# Shop tickets\n" },
+      ]);
+    });
   });
 
   describe("with symlinks in the Tracker folder", () => {
