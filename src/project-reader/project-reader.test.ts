@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { type PrLookup, readProject } from "./project-reader.ts";
+import { type PrLookup, readProject, watchedFolders } from "./project-reader.ts";
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -423,6 +423,34 @@ describe("readProject", () => {
 
       expect(model.features.map((feature) => feature.slug)).toEqual(["checkout"]);
       expect(model.skipped).toEqual([]);
+    });
+  });
+});
+
+describe("watchedFolders", () => {
+  const projectPath = path.join(path.sep, "work", "shop");
+
+  it("watches the Tracker folder recursively and each Project-level page folder on its own", () => {
+    expect(watchedFolders(projectPath, {})).toEqual([
+      { path: path.join(projectPath, ".scratch"), recursive: true },
+      { path: projectPath, recursive: false },
+      { path: path.join(projectPath, "docs", "adr"), recursive: false },
+      { path: path.join(projectPath, ".out-of-scope"), recursive: false },
+    ]);
+  });
+
+  it("watches the Project root once, recursively, when it is the Tracker folder", () => {
+    expect(watchedFolders(projectPath, { trackerFolder: "." })).toEqual([
+      { path: projectPath, recursive: true },
+      { path: path.join(projectPath, "docs", "adr"), recursive: false },
+      { path: path.join(projectPath, ".out-of-scope"), recursive: false },
+    ]);
+  });
+
+  it("watches a Tracker folder outside the Project", () => {
+    expect(watchedFolders(projectPath, { trackerFolder: "../tickets" })[0]).toEqual({
+      path: path.join(path.sep, "work", "tickets"),
+      recursive: true,
     });
   });
 });
