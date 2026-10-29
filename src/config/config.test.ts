@@ -89,6 +89,21 @@ describe("openConfig", () => {
     expect(await readdir(path.dirname(target))).toEqual(["config.json"]);
   });
 
+  it("survives two saves at once in one process, leaving no temp file", async () => {
+    await writeConfigFile("{}");
+
+    await Promise.all([
+      openConfig(configPath).set("port", 5050),
+      openConfig(configPath).set("open", false),
+    ]);
+
+    // The last rename wins, so only one of the two writes is kept.
+    expect([[{ port: 5050 }], [{ open: false }]]).toContainEqual([
+      await openConfig(configPath).settings(),
+    ]);
+    expect(await readdir(path.dirname(configPath))).toEqual(["config.json"]);
+  });
+
   it("rejects a file that is not valid JSON, naming the file", async () => {
     await writeConfigFile("{ not json");
 

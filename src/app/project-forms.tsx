@@ -1,13 +1,13 @@
 import { DEFAULT_TRACKER_FOLDER } from "../project-reader/project-reader.ts";
 import type { Project } from "../registry/registry.ts";
-import { ActionForm } from "./action-form.tsx";
+import { ActionForm, Field } from "./action-form.tsx";
 import { addProject, removeProject, setTrackerFolder } from "./actions.ts";
 
 export function AddProjectForm() {
   return (
     <ActionForm action={addProject} label="Add a Project">
       <label>
-        Add a Project <input name="path" placeholder="/absolute/path/to/folder" required />
+        Add a Project <Field name="path" placeholder="/absolute/path/to/folder" required />
       </label>{" "}
       <button type="submit">Add</button>
     </ActionForm>
@@ -29,7 +29,7 @@ export function TrackerFolderForm({ project }: { project: Project }) {
       <input type="hidden" name="path" value={project.path} />
       <label>
         Tracker folder{" "}
-        <input
+        <Field
           name="trackerFolder"
           defaultValue={project.trackerFolder ?? ""}
           placeholder={`${DEFAULT_TRACKER_FOLDER} (default)`}

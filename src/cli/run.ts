@@ -139,16 +139,17 @@ async function runConfig(invocation: Invocation): Promise<number> {
 
 async function runConfigPrint(config: Config, deps: CliDeps): Promise<number> {
   const settings = await config.settings();
-  const projects = await openRegistry(config.path).list();
   const lines = [`config file: ${config.path}`];
   for (const key of Object.keys(SETTINGS) as SettingKey[]) {
     lines.push(`${key}: ${settings[key] ?? `${SETTINGS[key].default} (default)`}`);
   }
-  for (const project of projects) {
-    const trackerFolder = project.trackerFolder ?? `${DEFAULT_TRACKER_FOLDER} (default)`;
-    lines.push(`tracker ${project.path}: ${trackerFolder}`);
-  }
+  // Printed before the Projects are read, so an invalid Project still shows
+  // the settings above the error.
   deps.stdout(`${lines.join("\n")}\n`);
+  for (const project of await openRegistry(config.path).list()) {
+    const trackerFolder = project.trackerFolder ?? `${DEFAULT_TRACKER_FOLDER} (default)`;
+    deps.stdout(`tracker ${project.path}: ${trackerFolder}\n`);
+  }
   return 0;
 }
 

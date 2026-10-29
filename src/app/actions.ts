@@ -6,21 +6,30 @@ import path from "node:path";
 import { projectHref } from "./project-urls.ts";
 import { appRegistry, errorMessage } from "./projects.ts";
 
-// What a form shows after its action ran: the error, if the action failed.
-export type ActionState = { error?: string };
+// What a form shows after its action ran: the error, if the action failed,
+// with the values that were submitted so the fields keep them.
+export type ActionState = { error?: string; values?: Record<string, string> };
 
 function field(formData: FormData, name: string): string {
   const value = formData.get(name);
   return typeof value === "string" ? value.trim() : "";
 }
 
+function failed(formData: FormData, error: string): ActionState {
+  const values: Record<string, string> = {};
+  for (const [name, value] of formData) {
+    if (typeof value === "string") values[name] = value;
+  }
+  return { error, values };
+}
+
 // Runs a registry change and refreshes every page on success. Gives the
 // error to show when the change fails.
-async function change(run: () => Promise<unknown>): Promise<ActionState> {
+async function change(formData: FormData, run: () => Promise<unknown>): Promise<ActionState> {
   try {
     await run();
   } catch (error) {
-    return { error: errorMessage(error) };
+    return failed(formData, errorMessage(error));
   }
   revalidatePath("/", "layout");
   return {};
@@ -30,10 +39,10 @@ async function change(run: () => Promise<unknown>): Promise<ActionState> {
 export async function addProject(_state: ActionState, formData: FormData): Promise<ActionState> {
   const pasted = field(formData, "path");
   if (!path.isAbsolute(pasted)) {
-    return { error: `${pasted || "An empty path"} is not an absolute path` };
+    return failed(formData, `${pasted || "An empty path"} is not an absolute path`);
   }
   let added = "";
-  const state = await change(async () => {
+  const state = await change(formData, async () => {
     added = (await appRegistry().add(pasted)).path;
   });
   if (state.error) return state;
@@ -44,7 +53,7 @@ export async function removeProject(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const state = await change(() => appRegistry().remove(field(formData, "path")));
+  const state = await change(formData, () => appRegistry().remove(field(formData, "path")));
   if (state.error) return state;
   redirect("/");
 }
@@ -56,7 +65,7 @@ export async function setTrackerFolder(
 ): Promise<ActionState> {
   const projectPath = field(formData, "path");
   const trackerFolder = formData.has("clear") ? "" : field(formData, "trackerFolder");
-  return change(() =>
+  return change(formData, () =>
     trackerFolder === ""
       ? appRegistry().clearTrackerFolder(projectPath)
       : appRegistry().setTrackerFolder(projectPath, trackerFolder),

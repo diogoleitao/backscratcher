@@ -18,12 +18,16 @@ export class AlreadyRegisteredError extends RegistryError {
 
 const TRACKER_FOLDER_RULE = "a relative path to a folder inside the Project";
 
+// Stands in for any Project folder: the check depends only on the path's text.
+// Not the file system root, where `..` would resolve back to the root itself.
+const SOME_PROJECT = path.resolve("/project");
+
 // The Tracker folder is a folder inside the Project, never the Project folder
 // itself. Checked on the text alone; a symlink inside the Project is followed.
 function isTrackerFolder(value: unknown): value is string {
   if (typeof value !== "string" || value === "" || path.isAbsolute(value)) return false;
-  const normalized = path.normalize(value);
-  return normalized !== "." && normalized !== ".." && !normalized.startsWith(`..${path.sep}`);
+  const relative = path.relative(SOME_PROJECT, path.resolve(SOME_PROJECT, value));
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`);
 }
 
 function checkTrackerFolder(trackerFolder: string): void {

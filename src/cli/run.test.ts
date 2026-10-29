@@ -174,6 +174,20 @@ describe("backscratcher config", () => {
     expect(result.stderr).toContain(`${configPath} is not valid JSON`);
   });
 
+  it("prints the settings and reports invalid Projects, exiting 1", async () => {
+    const projects = [{ path: projectDir, trackerFolder: "../elsewhere" }];
+    await writeFile(configPath, JSON.stringify({ settings: { port: 5050 }, projects }));
+
+    const result = await cli(["config", "--config", configPath]);
+    expect(result).toEqual({
+      code: 1,
+      stdout: `config file: ${configPath}\nport: 5050\nopen: true (default)\n`,
+      stderr: `backscratcher: config file ${configPath}: the trackerFolder of ${projectDir} must be a relative path to a folder inside the Project\n`,
+      started: [],
+      configPaths: [],
+    });
+  });
+
   it.each([
     ["port", "abc"],
     ["port", "70000"],

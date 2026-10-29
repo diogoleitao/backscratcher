@@ -257,7 +257,19 @@ describe("openRegistry", () => {
       await expect(access(configPath)).rejects.toThrow();
     });
 
-    it.each([[""], ["."], [".."], ["../elsewhere"], ["docs/../../elsewhere"], ["/etc"]])(
+    it.each([
+      [""],
+      ["."],
+      ["./"],
+      [".//"],
+      ["docs/.."],
+      ["docs/../"],
+      [".."],
+      ["../"],
+      ["../elsewhere"],
+      ["docs/../../elsewhere"],
+      ["/etc"],
+    ])(
       "rejects the override %j, which is not a folder inside the Project, without writing",
       async (trackerFolder) => {
         await openRegistry(configPath).add(projectDir);
