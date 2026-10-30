@@ -24,8 +24,12 @@ const SOME_PROJECT = path.resolve("/project");
 
 // The Tracker folder is a folder inside the Project, never the Project folder
 // itself. Checked on the text alone; a symlink inside the Project is followed.
+// Any root is rejected, not only absolute paths: on Windows a drive-relative
+// value such as `D:x` is not absolute, yet can land on another drive.
 function isTrackerFolder(value: unknown): value is string {
-  if (typeof value !== "string" || value === "" || path.isAbsolute(value)) return false;
+  if (typeof value !== "string" || value === "" || path.parse(value).root !== "") {
+    return false;
+  }
   const relative = path.relative(SOME_PROJECT, path.resolve(SOME_PROJECT, value));
   return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`);
 }
