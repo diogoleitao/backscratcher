@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ifExists } from "../fs.ts";
@@ -34,12 +35,13 @@ export function openConfigFile(configPath: string) {
 
     // Writes a temp file beside the config file, then renames it over, so a
     // reader never sees a half-written file. A symlinked config file is
-    // written at its target, keeping the link. Two writers at once can still
-    // lose one write: the last rename wins.
+    // written at its target, keeping the link. Each save has its own temp
+    // file, so saves at once in one process (the server) do not collide. Two
+    // writers at once can still lose one write: the last rename wins.
     async save(config: ConfigFile): Promise<void> {
       const target = (await ifExists(realpath(configPath))) ?? configPath;
       await mkdir(path.dirname(target), { recursive: true });
-      const temp = `${target}.${process.pid}.tmp`;
+      const temp = `${target}.${randomUUID()}.tmp`;
       try {
         await writeFile(temp, `${JSON.stringify(config, null, 2)}\n`);
         await rename(temp, target);

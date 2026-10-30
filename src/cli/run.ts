@@ -8,7 +8,13 @@ import {
   type Settings,
 } from "../config/config.ts";
 import { ConfigError } from "../config/file.ts";
-import { openRegistry, RegistryError, resolveProjectPath } from "../registry/registry.ts";
+import { DEFAULT_TRACKER_FOLDER } from "../project-reader/project-reader.ts";
+import {
+  AlreadyRegisteredError,
+  openRegistry,
+  RegistryError,
+  resolveProjectPath,
+} from "../registry/registry.ts";
 import { PortInUseError } from "../server/errors.ts";
 import { resolveServerOptions, type ServerOptions } from "../server/options.ts";
 
@@ -76,6 +82,14 @@ const COMMANDS: Record<string, (invocation: Invocation) => Promise<number>> = {
   config: runConfig,
 };
 
+// `config <key> ...` for the keys kept per Project rather than as settings.
+const PROJECT_CONFIG: Record<
+  string,
+  (invocation: Invocation, values: string[]) => Promise<number>
+> = {
+  tracker: runConfigTracker,
+};
+
 async function dispatch(argv: string[], deps: CliDeps): Promise<number> {
   const args = parseCliArgs(argv);
   const config = openConfig(
@@ -96,7 +110,7 @@ async function dispatch(argv: string[], deps: CliDeps): Promise<number> {
 }
 
 async function runStart({ args, config, deps }: Invocation): Promise<number> {
-  rejectFlags(args, ["unset"], "start");
+  allowFlags(args, ["port", "no-open"], "start");
   const port =
     args.values.port === undefined ? undefined : parseSetting("port", args.values.port);
   const options = resolveServerOptions({
@@ -107,12 +121,17 @@ async function runStart({ args, config, deps }: Invocation): Promise<number> {
   return 0;
 }
 
-async function runConfig({ args, operands, config, deps }: Invocation): Promise<number> {
-  rejectFlags(args, ["port", "no-open"], "config");
-  const [key, value, ...extra] = operands;
+async function runConfig(invocation: Invocation): Promise<number> {
+  const { args, operands, config, deps } = invocation;
+  allowFlags(args, ["unset"], "config");
+  const [key, ...values] = operands;
+  if (key !== undefined && Object.hasOwn(PROJECT_CONFIG, key)) {
+    return PROJECT_CONFIG[key](invocation, values);
+  }
+  const [value, ...extra] = values;
   rejectExtra(extra);
   if (key === undefined) {
-    rejectFlags(args, ["unset"], "config without a setting");
+    allowFlags(args, [], "config without a setting");
     return runConfigPrint(config, deps);
   }
   return runConfigSet(config, key, value, args.values.unset ?? false);
@@ -124,7 +143,35 @@ async function runConfigPrint(config: Config, deps: CliDeps): Promise<number> {
   for (const key of Object.keys(SETTINGS) as SettingKey[]) {
     lines.push(`${key}: ${settings[key] ?? `${SETTINGS[key].default} (default)`}`);
   }
+  // Printed before the Projects are read, so an invalid Project still shows
+  // the settings above the error.
   deps.stdout(`${lines.join("\n")}\n`);
+  for (const project of await openRegistry(config.path).list()) {
+    const trackerFolder = project.trackerFolder ?? `${DEFAULT_TRACKER_FOLDER} (default)`;
+    deps.stdout(`tracker ${project.path}: ${trackerFolder}\n`);
+  }
+  return 0;
+}
+
+// `config tracker <dir> [path]` and `config tracker --unset [path]`: the
+// working directory's Project when no path is given.
+async function runConfigTracker(
+  { args, config, deps }: Invocation,
+  values: string[],
+): Promise<number> {
+  const registry = openRegistry(config.path);
+  if (args.values.unset) {
+    const [target, ...extra] = values;
+    rejectExtra(extra);
+    await registry.clearTrackerFolder(resolveProjectPath(deps.cwd, target));
+    return 0;
+  }
+  const [trackerFolder, target, ...extra] = values;
+  if (trackerFolder === undefined) {
+    throw new UsageError("config tracker takes a folder, or --unset");
+  }
+  rejectExtra(extra);
+  await registry.setTrackerFolder(resolveProjectPath(deps.cwd, target), trackerFolder);
   return 0;
 }
 
@@ -135,7 +182,7 @@ async function runConfigSet(
   unset: boolean,
 ): Promise<number> {
   if (!isSettingKey(key)) {
-    const known = Object.keys(SETTINGS).join(" or ");
+    const known = [...Object.keys(SETTINGS), ...Object.keys(PROJECT_CONFIG)].join(" or ");
     throw new UsageError(`unknown setting "${key}" (expected ${known})`);
   }
   if (unset) {
@@ -165,22 +212,36 @@ function parseSetting<K extends SettingKey>(
 }
 
 async function runAdd(invocation: Invocation): Promise<number> {
-  const projectPath = parseProjectPath(invocation, "add");
-  const { path, added } = await openRegistry(invocation.config.path).add(projectPath);
-  invocation.deps.stdout(`${added ? "added" : "already registered"}: ${path}\n`);
+  const projectPath = parseProjectPath(invocation, "add", ["tracker"]);
+  let result;
+  try {
+    result = await openRegistry(invocation.config.path).add(projectPath, {
+      trackerFolder: invocation.args.values.tracker,
+    });
+  } catch (error) {
+    if (!(error instanceof AlreadyRegisteredError)) throw error;
+    throw new RegistryError(
+      `${error.message}; set its Tracker folder with: backscratcher config tracker <dir> [path]`,
+    );
+  }
+  invocation.deps.stdout(`${result.added ? "added" : "already registered"}: ${result.path}\n`);
   return 0;
 }
 
 async function runRemove(invocation: Invocation): Promise<number> {
-  const projectPath = parseProjectPath(invocation, "remove");
+  const projectPath = parseProjectPath(invocation, "remove", []);
   const removed = await openRegistry(invocation.config.path).remove(projectPath);
   invocation.deps.stdout(`removed: ${removed}\n`);
   return 0;
 }
 
 // `add [path]` and `remove [path]`: the working directory when no path is given.
-function parseProjectPath({ args, operands, deps }: Invocation, command: string): string {
-  rejectFlags(args, ["port", "no-open", "unset"], command);
+function parseProjectPath(
+  { args, operands, deps }: Invocation,
+  command: string,
+  allowed: Flag[],
+): string {
+  allowFlags(args, allowed, command);
   const [target, ...extra] = operands;
   rejectExtra(extra);
   return resolveProjectPath(deps.cwd, target);
@@ -192,27 +253,28 @@ function rejectExtra(extra: string[]): void {
   }
 }
 
-function rejectFlags(
-  args: Args,
-  flags: ("port" | "no-open" | "unset")[],
-  context: string,
-): void {
-  const given = flags.find((flag) => args.values[flag] !== undefined);
+const OPTIONS = {
+  config: { type: "string" },
+  port: { type: "string" },
+  "no-open": { type: "boolean" },
+  unset: { type: "boolean" },
+  tracker: { type: "string" },
+} as const;
+
+// Every flag but --config, which every command takes.
+type Flag = Exclude<keyof typeof OPTIONS, "config">;
+
+const FLAGS = Object.keys(OPTIONS).filter((flag): flag is Flag => flag !== "config");
+
+// Rejects the first flag given that the command does not take.
+function allowFlags(args: Args, allowed: Flag[], context: string): void {
+  const given = FLAGS.find((flag) => !allowed.includes(flag) && args.values[flag] !== undefined);
   if (given) throw new UsageError(`--${given} is not valid with ${context}`);
 }
 
 function parseCliArgs(argv: string[]) {
   try {
-    return parseArgs({
-      args: argv,
-      allowPositionals: true,
-      options: {
-        config: { type: "string" },
-        port: { type: "string" },
-        "no-open": { type: "boolean" },
-        unset: { type: "boolean" },
-      },
-    });
+    return parseArgs({ args: argv, allowPositionals: true, options: OPTIONS });
   } catch (error) {
     throw new UsageError((error as Error).message);
   }

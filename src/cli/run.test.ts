@@ -174,6 +174,20 @@ describe("backscratcher config", () => {
     expect(result.stderr).toContain(`${configPath} is not valid JSON`);
   });
 
+  it("prints the settings and reports invalid Projects, exiting 1", async () => {
+    const projects = [{ path: projectDir, trackerFolder: "../elsewhere" }];
+    await writeFile(configPath, JSON.stringify({ settings: { port: 5050 }, projects }));
+
+    const result = await cli(["config", "--config", configPath]);
+    expect(result).toEqual({
+      code: 1,
+      stdout: `config file: ${configPath}\nport: 5050\nopen: true (default)\n`,
+      stderr: `backscratcher: config file ${configPath}: the trackerFolder of ${projectDir} must be a relative path to a folder inside the Project\n`,
+      started: [],
+      configPaths: [],
+    });
+  });
+
   it.each([
     ["port", "abc"],
     ["port", "70000"],
@@ -189,6 +203,87 @@ describe("backscratcher config", () => {
     expect((await cli(["config", "--config", configPath])).stdout).toContain(
       "port: 4747 (default)\nopen: true (default)",
     );
+  });
+});
+
+describe("backscratcher config tracker", () => {
+  const projects = () => openRegistry(configPath).list();
+
+  it("sets the current directory's override, and config prints each Project's", async () => {
+    const other = path.join(dir, "other");
+    await mkdir(other);
+    await cli(["add", "--config", configPath]);
+    await cli(["add", other, "--config", configPath]);
+
+    const result = await cli(["config", "tracker", "docs/tickets", "--config", configPath]);
+    expect(result).toMatchObject({ code: 0, stderr: "" });
+
+    expect((await cli(["config", "--config", configPath])).stdout).toBe(
+      `config file: ${configPath}\nport: 4747 (default)\nopen: true (default)\n` +
+        `tracker ${projectDir}: docs/tickets\n` +
+        `tracker ${other}: .scratch (default)\n`,
+    );
+  });
+
+  it("sets and unsets the override of a Project named by path", async () => {
+    const other = path.join(dir, "other");
+    await mkdir(other);
+    await cli(["add", other, "--config", configPath]);
+
+    await cli(["config", "tracker", "tickets", "../other", "--config", configPath]);
+    expect(await projects()).toEqual([{ path: other, trackerFolder: "tickets" }]);
+
+    const result = await cli(["config", "tracker", "--unset", "../other", "--config", configPath]);
+    expect(result).toMatchObject({ code: 0, stderr: "" });
+    expect(await projects()).toEqual([{ path: other }]);
+  });
+
+  it("reports a path that is not a registered Project as one line, exiting 1", async () => {
+    const result = await cli(["config", "tracker", "docs", "--config", configPath]);
+    expect(result).toMatchObject({
+      code: 1,
+      stderr: `backscratcher: ${projectDir} is not a registered Project\n`,
+    });
+  });
+
+  it("reports an override outside the Project as one line, exiting 1", async () => {
+    await cli(["add", "--config", configPath]);
+
+    const result = await cli(["config", "tracker", "../elsewhere", "--config", configPath]);
+    expect(result).toMatchObject({
+      code: 1,
+      stderr:
+        'backscratcher: invalid Tracker folder "../elsewhere" (expected a relative path to a folder inside the Project)\n',
+    });
+    expect(await projects()).toEqual([{ path: projectDir }]);
+  });
+
+  it("rejects add --tracker on a registered Project, pointing to config tracker", async () => {
+    await cli(["add", "--tracker", "kept", "--config", configPath]);
+
+    const result = await cli(["add", "--tracker", "docs", "--config", configPath]);
+    expect(result).toMatchObject({
+      code: 1,
+      stderr: `backscratcher: ${projectDir} is already a registered Project; set its Tracker folder with: backscratcher config tracker <dir> [path]\n`,
+    });
+    expect(await projects()).toEqual([{ path: projectDir, trackerFolder: "kept" }]);
+  });
+
+  it.each([
+    [["config", "tracker"]],
+    [["config", "tracker", "docs", ".", "extra"]],
+    [["config", "tracker", "--unset", ".", "extra"]],
+    [["config", "tracker", "docs", "--tracker", "docs"]],
+    [["config", "port", "5000", "--tracker", "docs"]],
+    [["remove", "--tracker", "docs"]],
+    [["--tracker", "docs"]],
+  ])("rejects %j without changing the override", async (argv) => {
+    await cli(["add", "--tracker", "kept", "--config", configPath]);
+
+    const result = await cli([...argv, "--config", configPath]);
+    expect(result).toMatchObject({ code: 2, started: [] });
+    expect(result.stderr).not.toBe("");
+    expect(await projects()).toEqual([{ path: projectDir, trackerFolder: "kept" }]);
   });
 });
 
@@ -210,6 +305,12 @@ describe("backscratcher add and remove", () => {
     const result = await cli(["add", "nested", "--config", configPath]);
     expect(result.stdout).toBe(`added: ${path.join(projectDir, "nested")}\n`);
     expect(await projects()).toEqual([{ path: path.join(projectDir, "nested") }]);
+  });
+
+  it("adds a Project with a Tracker folder override", async () => {
+    const result = await cli(["add", "--tracker", "docs/tickets", "--config", configPath]);
+    expect(result).toMatchObject({ code: 0, stdout: `added: ${projectDir}\n` });
+    expect(await projects()).toEqual([{ path: projectDir, trackerFolder: "docs/tickets" }]);
   });
 
   it("removes the current directory", async () => {

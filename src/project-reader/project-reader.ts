@@ -34,6 +34,9 @@ export type ProjectModel = {
   pages: ProjectLevelPage[];
 };
 
+// The Tracker folder a Project without an override uses, relative to its folder.
+export const DEFAULT_TRACKER_FOLDER = ".scratch";
+
 type PageSource = { folder: string; accepts: (name: string) => boolean };
 
 const isMarkdown = (name: string) => name.endsWith(".md");
@@ -74,7 +77,7 @@ export async function readProject(
   projectPath: string,
   options: { trackerFolder?: string; prLookup: PrLookup },
 ): Promise<ProjectModel> {
-  const trackerPath = path.resolve(projectPath, options.trackerFolder ?? ".scratch");
+  const trackerPath = path.resolve(projectPath, options.trackerFolder ?? DEFAULT_TRACKER_FOLDER);
   const pages = await readPages(projectPath, trackerPath);
   const entries = await ifExists(readdir(trackerPath));
   if (entries === undefined) {
