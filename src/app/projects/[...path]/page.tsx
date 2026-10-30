@@ -41,7 +41,12 @@ export default async function ProjectPage({
       <ProjectSwitcher projects={projectList.projects} current={project} />
       {project && read ? (
         <section>
-          <LiveUpdates href={eventsHref(project)} version={versionOf(read)} />
+          {/* The stream reads the Project once, so a new Tracker folder needs a new one. */}
+          <LiveUpdates
+            key={project.trackerFolder}
+            href={eventsHref(project)}
+            version={versionOf(read)}
+          />
           <h2>{path.basename(project.path)}</h2>
           <p>{project.path}</p>
           <TrackerFolderForm key={project.trackerFolder} project={project} />
