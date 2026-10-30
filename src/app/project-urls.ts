@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { Feature, Ticket } from "../project-reader/project-reader.ts";
 import type { Project } from "../registry/registry.ts";
 
 // Split on this platform's separator only: on POSIX a backslash is part of a
@@ -26,6 +27,11 @@ export function featureHref(project: Project, slug: string): string {
 
 export function pageHref(project: Project, pagePath: string): string {
   return queryHref(project, "page", pagePath);
+}
+
+// A Ticket is named by its file, so two files sharing a number stay distinct.
+export function ticketHref(project: Project, feature: Feature, ticket: Ticket): string {
+  return `${featureHref(project, feature.slug)}&ticket=${encodeURIComponent(ticket.file)}`;
 }
 
 // Catch-all params arrive still percent-encoded. Next rejects a malformed
