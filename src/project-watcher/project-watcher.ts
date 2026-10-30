@@ -6,9 +6,13 @@ import { type WatchedFolder, watchedFolders } from "../project-reader/project-re
 
 // Changes on disk often come in bursts, such as an editor's write and rename.
 // A burst that never settles, such as steady writes under a watched Project
-// root, still reports once MAX_WAIT_MS after it started.
+// root, still reports once MAX_WAIT_MS after it started. Reports come at most
+// once per MIN_GAP_MS, so a file saved over and over, such as an agent
+// appending to a Spec, does not re-read the Project on every save; the last
+// change is still reported.
 const SETTLE_MS = 100;
 const MAX_WAIT_MS = 1000;
+const MIN_GAP_MS = 1000;
 
 // A folder found on disk, with its inode to tell a remade folder apart.
 type FoundFolder = WatchedFolder & { ino: number };
@@ -44,19 +48,23 @@ export async function watchProject(
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
   let burstStart: number | undefined;
+  let lastReport = -Infinity;
   let syncing = Promise.resolve();
 
   const scheduleChange = () => {
     if (stopped) return;
-    burstStart ??= Date.now();
+    const now = Date.now();
+    burstStart ??= now;
     clearTimeout(timer);
-    const delay = Math.min(SETTLE_MS, burstStart + MAX_WAIT_MS - Date.now());
+    const settled = Math.min(SETTLE_MS, burstStart + MAX_WAIT_MS - now);
+    const spaced = lastReport + MIN_GAP_MS - now;
     timer = setTimeout(() => {
       burstStart = undefined;
+      lastReport = Date.now();
       syncing = syncing.then(syncQuietly).then(() => {
         if (!stopped) onChange();
       });
-    }, Math.max(0, delay));
+    }, Math.max(0, settled, spaced));
   };
 
   // A folder that cannot be read, such as one without permission, stays

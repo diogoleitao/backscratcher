@@ -10,9 +10,10 @@ const encoder = new TextEncoder();
 
 // Server-sent events for one registered Project, at the same path as its page.
 // The `version` query parameter is the version of the Project the page shows.
-// A `change` event follows whenever what the Project reader returns differs
-// from the last version sent, starting with the page's; the page then
-// re-renders and reconnects with its new version.
+// A `change` event, with the new version as its id, follows whenever what the
+// Project reader returns differs from the last version sent, starting with the
+// page's; the page then re-renders and keeps the stream open. The browser
+// sends the last id back as Last-Event-ID when it reconnects on its own.
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ path: string[] }> },
@@ -27,7 +28,8 @@ export async function GET(
     return new Response(`/${segments.join("/")} is not a registered Project.`, { status: 404 });
   }
 
-  let last = new URL(request.url).searchParams.get("version");
+  let last =
+    request.headers.get("Last-Event-ID") ?? new URL(request.url).searchParams.get("version");
   let reading = Promise.resolve();
   let closed = false;
   let stopWatching = () => {};
@@ -52,7 +54,7 @@ export async function GET(
           const next = versionOf(await readRegisteredProject(project));
           if (closed || next === last) return;
           last = next;
-          controller.enqueue(encoder.encode("event: change\ndata:\n\n"));
+          controller.enqueue(encoder.encode(`id: ${next}\nevent: change\ndata:\n\n`));
         });
       };
       // The first check runs once the watch is in place, so a change made
