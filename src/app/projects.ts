@@ -30,16 +30,16 @@ export async function listProjects(): Promise<ProjectList> {
 
 export type ProjectRead = { model: ProjectModel } | { error: string };
 
-// The read and the watch of a registered Project live together so they always
-// agree on its Tracker folder.
+// Where a registered Project keeps its files, built once for both the read
+// and the watch so they always use the same Tracker folder.
+function folderOptions(project: Project): { trackerFolder?: string } {
+  return { trackerFolder: project.trackerFolder };
+}
+
 export async function readRegisteredProject(project: Project): Promise<ProjectRead> {
   try {
-    return {
-      model: await readProject(project.path, {
-        trackerFolder: project.trackerFolder,
-        prLookup: async () => [],
-      }),
-    };
+    const options = { ...folderOptions(project), prLookup: async () => [] };
+    return { model: await readProject(project.path, options) };
   } catch (error) {
     return { error: errorMessage(error) };
   }
@@ -49,7 +49,7 @@ export function watchRegisteredProject(
   project: Project,
   onChange: () => void,
 ): Promise<() => void> {
-  return watchProject(project.path, {}, onChange);
+  return watchProject(project.path, folderOptions(project), onChange);
 }
 
 // Identifies what a read returned, so a page rendered from it can tell the

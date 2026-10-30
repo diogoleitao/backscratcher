@@ -63,6 +63,13 @@ export async function watchProject(
   // unwatched; the read that follows reports it.
   const syncQuietly = () => sync().catch(() => undefined);
 
+  // A folder that went away between the stat and the watch is looked for
+  // again. Any other failure (ENOSPC, EACCES, EMFILE) would fail the same way
+  // on every retry, so the folder stays unwatched until another change.
+  const rescheduleIfGone = (error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") scheduleChange();
+  };
+
   // Moves each watch to where its target now is. A folder that was deleted and
   // made again has a new inode, and the old watch no longer sees it.
   async function sync(): Promise<void> {
@@ -83,16 +90,15 @@ export async function watchProject(
       if (folder === undefined || stopped) continue;
       try {
         const watcher = watch(folder.path, { recursive: folder.recursive }, scheduleChange);
-        // A watch that errored sees nothing more, so the next sync replaces it.
-        watcher.on("error", () => {
+        // A watch that errored sees nothing more, so a later sync replaces it.
+        watcher.on("error", (error) => {
           watcher.close();
           if (active[index]?.watcher === watcher) active[index] = undefined;
-          scheduleChange();
+          rescheduleIfGone(error);
         });
         active[index] = { ...folder, watcher };
-      } catch {
-        // The folder went away between the stat and the watch.
-        scheduleChange();
+      } catch (error) {
+        rescheduleIfGone(error);
       }
     }
   }
