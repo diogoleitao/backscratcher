@@ -235,6 +235,8 @@ describe("readProject", () => {
           number: 1,
           title: "Show the cart total",
           status: "ready-for-agent",
+          blockers: [],
+          brokenBlockers: [],
           source:
             "# 01: Show the cart total\n\n**Status:** ready-for-agent\n\n## What to build\n\nShow the sum of the items in the cart.\n",
           warnings: [],
@@ -244,6 +246,8 @@ describe("readProject", () => {
           number: 2,
           title: "Pay by card",
           status: "needs-triage",
+          blockers: [],
+          brokenBlockers: [],
           source:
             "# 02: Pay by card\n\nStatus: needs-triage\n\n## What to build\n\nTake a card payment for the cart total.\n",
           warnings: [],
@@ -347,8 +351,115 @@ describe("readProject", () => {
           number: 2,
           title: "Email a receipt",
           status: "ready-for-agent",
+          blockers: [],
+          brokenBlockers: [],
           source: await readFile(file, "utf8"),
           warnings: [],
+        },
+      ]);
+    });
+  });
+
+  describe("Blockers", () => {
+    const blockersOf = (tickets: { number: number; blockers: string[]; brokenBlockers: string[] }[]) =>
+      tickets.map(({ number, blockers, brokenBlockers }) => ({ number, blockers, brokenBlockers }));
+
+    it("resolves Blockers written by number, from bold and plain header lines only", async () => {
+      const { model } = await readFixture("ticket-blockers-by-number");
+
+      expect(blockersOf(model.features[0].tickets)).toEqual([
+        { number: 1, blockers: [], brokenBlockers: [] },
+        { number: 2, blockers: ["01-cart-total.md"], brokenBlockers: [] },
+        { number: 3, blockers: ["01-cart-total.md", "02-card-payment.md"], brokenBlockers: [] },
+      ]);
+      expect(model.features[0].tickets.flatMap((ticket) => ticket.warnings)).toEqual([]);
+    });
+
+    it("resolves Blockers written by title in any case, including titles that start with a number or end in ?", async () => {
+      const { model } = await readFixture("ticket-blockers-by-title");
+
+      expect(blockersOf(model.features[0].tickets)).toEqual([
+        { number: 1, blockers: [], brokenBlockers: [] },
+        { number: 2, blockers: ["01-cart-total.md"], brokenBlockers: [] },
+        { number: 3, blockers: ["01-cart-total.md", "02-card-payment.md"], brokenBlockers: [] },
+        { number: 4, blockers: [], brokenBlockers: [] },
+        { number: 5, blockers: [], brokenBlockers: [] },
+        { number: 6, blockers: ["04-3d-secure.md", "05-slow-checkout.md"], brokenBlockers: [] },
+      ]);
+      expect(model.features[0].tickets.flatMap((ticket) => ticket.warnings)).toEqual([]);
+    });
+
+    it("reads None, nothing, N/A, - or (none) as no Blockers, ignoring links later in the line", async () => {
+      const { model } = await readFixture("ticket-blockers-none");
+
+      expect(blockersOf(model.features[0].tickets)).toEqual([
+        { number: 1, blockers: [], brokenBlockers: [] },
+        { number: 2, blockers: [], brokenBlockers: [] },
+        { number: 3, blockers: [], brokenBlockers: [] },
+        { number: 4, blockers: [], brokenBlockers: [] },
+        { number: 5, blockers: [], brokenBlockers: [] },
+      ]);
+      expect(model.features[0].tickets.flatMap((ticket) => ticket.warnings)).toEqual([]);
+    });
+
+    it("keeps an entry that matches no other Ticket in the Feature, or names a missing number, as a broken Blocker reference", async () => {
+      const { model } = await readFixture("ticket-blockers-broken");
+
+      expect(blockersOf(model.features[0].tickets)).toEqual([
+        { number: 1, blockers: [], brokenBlockers: [] },
+        {
+          number: 2,
+          blockers: ["01-cart-total.md"],
+          brokenBlockers: ["07", "#08 (Store credit)", "Pay by card", "09: Show the cart total", "02"],
+        },
+      ]);
+      expect(model.features[0].tickets.flatMap((ticket) => ticket.warnings)).toEqual([]);
+    });
+
+    it("warns about an empty line, prose, links or numbers it cannot reduce, still resolving the other entries", async () => {
+      const { model } = await readFixture("ticket-blockers-unparseable");
+
+      expect(
+        model.features[0].tickets.map(({ number, blockers, brokenBlockers, warnings }) => ({
+          number,
+          blockers,
+          brokenBlockers,
+          warnings,
+        })),
+      ).toEqual([
+        {
+          number: 1,
+          blockers: [],
+          brokenBlockers: [],
+          warnings: [{ kind: "blocked-by-unparseable", line: "" }],
+        },
+        {
+          number: 2,
+          blockers: ["01-cart-total.md"],
+          brokenBlockers: [],
+          warnings: [
+            {
+              kind: "blocked-by-unparseable",
+              line: "01, waiting on ops. See https://example.com/ops",
+            },
+          ],
+        },
+        {
+          number: 3,
+          blockers: ["02-card-payment.md"],
+          brokenBlockers: [],
+          warnings: [
+            {
+              kind: "blocked-by-unparseable",
+              line: "Pay by card, see [the design](https://example.com/design)",
+            },
+          ],
+        },
+        {
+          number: 4,
+          blockers: [],
+          brokenBlockers: [],
+          warnings: [{ kind: "blocked-by-unparseable", line: "01 and 02" }],
         },
       ]);
     });
