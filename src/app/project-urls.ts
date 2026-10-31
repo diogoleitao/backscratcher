@@ -17,6 +17,11 @@ export function projectHref(project: Project): string {
   return hrefFor(segmentsOf(project.path));
 }
 
+// The Project's server-sent events.
+export function eventsHref(project: Project): string {
+  return `/events/${segmentsOf(project.path).map(encodeURIComponent).join("/")}`;
+}
+
 function queryHref(project: Project, key: "feature" | "page", value: string): string {
   return `${projectHref(project)}?${key}=${encodeURIComponent(value)}`;
 }
