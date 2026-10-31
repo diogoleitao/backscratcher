@@ -3,6 +3,7 @@ import type { Feature, Ticket } from "../project-reader/project-reader.ts";
 import type { Project } from "../registry/registry.ts";
 import { MarkdownArticle } from "./markdown.tsx";
 import { featureHref } from "./project-urls.ts";
+import { rawStatusBeside, statusText } from "./status-text.ts";
 import { WarningBadges } from "./warning-badges.tsx";
 
 export function TicketPage({
@@ -14,6 +15,7 @@ export function TicketPage({
   feature: Feature;
   ticket: Ticket;
 }) {
+  const rawStatus = rawStatusBeside(ticket);
   return (
     <>
       <p>
@@ -24,7 +26,13 @@ export function TicketPage({
       </h3>
       <p>
         {ticket.file}
-        {ticket.status && <> · Status: {ticket.status}</>}
+        {" · "}Status: {statusText(ticket)}
+        {rawStatus && (
+          <>
+            {" "}
+            (written as <code>{rawStatus}</code>)
+          </>
+        )}
       </p>
       {ticket.warnings.length > 0 && (
         <p>

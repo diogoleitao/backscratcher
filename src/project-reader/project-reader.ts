@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { ifExists } from "../fs.ts";
+import { TRIAGE_LABELS_FILE, triageLabels } from "./status.ts";
 import { readTickets, type Ticket } from "./ticket.ts";
 
 export type PullRequestRef = { repo: string; number: number };
@@ -13,6 +14,7 @@ export type PullRequest = PullRequestRef & {
 
 export type PrLookup = (refs: PullRequestRef[]) => Promise<PullRequest[]>;
 
+export type { NormalisedStatus } from "./status.ts";
 export type { Ticket, TicketWarning } from "./ticket.ts";
 
 export type Feature = { slug: string; spec: { source: string }; tickets: Ticket[] };
@@ -83,6 +85,7 @@ export async function readProject(
   if (entries === undefined) {
     return { trackerFolder: { path: trackerPath, exists: false }, features: [], skipped: [], pages };
   }
+  const labels = triageLabels(await readFileIfPresent(path.join(projectPath, TRIAGE_LABELS_FILE)));
   const features: Feature[] = [];
   const skipped: string[] = [];
   for (const slug of entries.sort((a, b) => a.localeCompare(b))) {
@@ -90,7 +93,7 @@ export async function readProject(
     if (!(await ifExists(stat(directory)))?.isDirectory()) continue;
     const spec = await readFileIfPresent(path.join(directory, "spec.md"));
     if (spec !== undefined) {
-      features.push({ slug, spec: { source: spec }, tickets: await readTickets(directory) });
+      features.push({ slug, spec: { source: spec }, tickets: await readTickets(directory, labels) });
     } else {
       skipped.push(slug);
     }
