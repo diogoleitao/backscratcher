@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { ifExists } from "../fs.ts";
+import { type NormalisedStatus, normaliseStatus, type TriageLabels } from "./status.ts";
 
 export type TicketWarning =
   | { kind: "heading-number-mismatch"; heading: string; filename: string }
@@ -13,6 +14,7 @@ export type Ticket = {
   number: number;
   title: string;
   status?: string;
+  normalisedStatus: NormalisedStatus;
   source: string;
   warnings: TicketWarning[];
 };
@@ -31,13 +33,18 @@ function headerOf(source: string): string {
   return section ? source.slice(0, section.index) : source;
 }
 
-function parseTicket({ file, number, slug }: TicketName, source: string): Ticket {
+function parseTicket(
+  { file, number, slug }: TicketName,
+  source: string,
+  labels: TriageLabels,
+): Ticket {
   const header = headerOf(source);
   const heading = HEADING.exec(header)?.[1].trim();
   const numbered = heading === undefined ? undefined : NUMBERED_TITLE.exec(heading);
-  const status = STATUS_LINE.exec(header)?.[1].trim();
+  const statusLine = STATUS_LINE.exec(header)?.[1].trim();
+  const status = statusLine || undefined;
   const warnings: TicketWarning[] = [];
-  if (status === "") warnings.push({ kind: "status-line-empty" });
+  if (statusLine === "") warnings.push({ kind: "status-line-empty" });
   if (heading !== undefined && !numbered) {
     warnings.push({ kind: "heading-without-number", heading });
   }
@@ -48,7 +55,8 @@ function parseTicket({ file, number, slug }: TicketName, source: string): Ticket
     file,
     number: Number(number),
     title: numbered?.[2].trim() || slug,
-    status: status || undefined,
+    status,
+    normalisedStatus: normaliseStatus(status, labels),
     source,
     warnings,
   };
@@ -59,13 +67,14 @@ function unreadableTicket({ file, number, slug }: TicketName, message: string): 
     file,
     number: Number(number),
     title: slug,
+    normalisedStatus: "none",
     source: "",
     warnings: [{ kind: "unreadable", message }],
   };
 }
 
 // Tickets are the NN-<slug>.md files in a Feature's issues/ folder.
-export async function readTickets(featurePath: string): Promise<Ticket[]> {
+export async function readTickets(featurePath: string, labels: TriageLabels): Promise<Ticket[]> {
   const issuesPath = path.join(featurePath, "issues");
   const tickets: Ticket[] = [];
   for (const file of (await ifExists(readdir(issuesPath))) ?? []) {
@@ -81,7 +90,7 @@ export async function readTickets(featurePath: string): Promise<Ticket[]> {
       tickets.push(unreadableTicket(name, (error as Error).message));
       continue;
     }
-    if (source !== undefined) tickets.push(parseTicket(name, source));
+    if (source !== undefined) tickets.push(parseTicket(name, source, labels));
   }
   return tickets.sort((a, b) => a.number - b.number || a.file.localeCompare(b.file));
 }

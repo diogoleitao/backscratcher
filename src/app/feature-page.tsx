@@ -3,6 +3,7 @@ import type { Feature } from "../project-reader/project-reader.ts";
 import type { Project } from "../registry/registry.ts";
 import { MarkdownArticle } from "./markdown.tsx";
 import { projectHref, ticketHref } from "./project-urls.ts";
+import { statusText } from "./status-text.ts";
 import { WarningBadges } from "./warning-badges.tsx";
 
 export function FeaturePage({ project, feature }: { project: Project; feature: Feature }) {
@@ -33,7 +34,7 @@ export function FeaturePage({ project, feature }: { project: Project; feature: F
                   <Link href={ticketHref(project, feature, ticket)}>{ticket.title}</Link>{" "}
                   <WarningBadges warnings={ticket.warnings} />
                 </td>
-                <td>{ticket.status}</td>
+                <td>{statusText(ticket)}</td>
               </tr>
             ))}
           </tbody>
