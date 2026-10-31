@@ -92,11 +92,22 @@ async function ProjectContent({
   if (found === undefined) {
     return <p role="alert">{slug} is not a Feature in this Project.</p>;
   }
-  if (!file) return <FeaturePage project={project} feature={found} />;
+  if (!file) {
+    return (
+      <FeaturePage project={project} feature={found} prLookupError={read.model.prLookupError} />
+    );
+  }
 
   const foundTicket = found.tickets.find((candidate) => candidate.file === file);
   if (foundTicket === undefined) {
     return <p role="alert">{file} is not a Ticket in {slug}.</p>;
   }
-  return <TicketPage project={project} feature={found} ticket={foundTicket} />;
+  return (
+    <TicketPage
+      project={project}
+      feature={found}
+      ticket={foundTicket}
+      prLookupError={read.model.prLookupError}
+    />
+  );
 }

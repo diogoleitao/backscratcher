@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import {
   chmod,
+  cp,
   lstat,
   mkdir,
   mkdtemp,
@@ -13,12 +15,48 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { type PrLookup, readProject } from "./project-reader.ts";
+import {
+  type PrLookup,
+  type PullRequest,
+  type PullRequestRef,
+  readProject,
+} from "./project-reader.ts";
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 
+const execFileAsync = promisify(execFile);
+
 const noPrs: PrLookup = async () => [];
+
+type KnownReference = Pick<PullRequest, "title" | "state"> | "issue";
+
+function fakeLookup(known: Record<string, KnownReference>) {
+  const calls: PullRequestRef[][] = [];
+  const lookup: PrLookup = async (refs) => {
+    calls.push(refs);
+    return refs.flatMap((ref) => {
+      const found = known[`${ref.repo}#${ref.number}`];
+      if (found === undefined || found === "issue") return [];
+      return [{ ...ref, ...found, url: `https://github.com/${ref.repo}/pull/${ref.number}` }];
+    });
+  };
+  return { lookup, calls };
+}
+
+async function copiedProject(fixture: string): Promise<string> {
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "backscratcher-prs-")));
+  await cp(path.join(fixtures, fixture), dir, { recursive: true });
+  return dir;
+}
+
+async function gitProject(fixture: string, remote?: string): Promise<string> {
+  const dir = await copiedProject(fixture);
+  await execFileAsync("git", ["init", "--quiet", dir]);
+  if (remote) await execFileAsync("git", ["-C", dir, "remote", "add", "origin", remote]);
+  return dir;
+}
 
 type Entry = { path: string; mtimeMs: number; contents?: string };
 
@@ -42,10 +80,14 @@ async function readFixture(name: string, trackerFolder?: string) {
 
 async function readUntouched(
   projectPath: string,
-  { trackerFolder, root = projectPath }: { trackerFolder?: string; root?: string } = {},
+  {
+    trackerFolder,
+    root = projectPath,
+    prLookup = noPrs,
+  }: { trackerFolder?: string; root?: string; prLookup?: PrLookup } = {},
 ) {
   const before = await snapshot(root);
-  const model = await readProject(projectPath, { trackerFolder, prLookup: noPrs });
+  const model = await readProject(projectPath, { trackerFolder, prLookup });
   expect(await snapshot(root)).toEqual(before);
   return { projectPath, model };
 }
@@ -59,8 +101,12 @@ describe("readProject", () => {
       features: [
         {
           slug: "checkout",
-          spec: { source: "# Checkout\n\nLet a shopper pay for the items in their cart.\n" },
+          spec: {
+            source: "# Checkout\n\nLet a shopper pay for the items in their cart.\n",
+            referencedPrs: [],
+          },
           tickets: [],
+          referencedPrs: [],
         },
       ],
       skipped: [],
@@ -107,7 +153,14 @@ describe("readProject", () => {
 
     expect(model).toEqual({
       trackerFolder: { path: path.join(projectPath, "docs", "tickets"), exists: true },
-      features: [{ slug: "billing", spec: { source: "# Billing\n" }, tickets: [] }],
+      features: [
+        {
+          slug: "billing",
+          spec: { source: "# Billing\n", referencedPrs: [] },
+          tickets: [],
+          referencedPrs: [],
+        },
+      ],
       skipped: [],
       pages: [{ kind: "tracker", path: "docs/tickets/index.md", source: "# Tickets\n" }],
     });
@@ -238,6 +291,7 @@ describe("readProject", () => {
           source:
             "# 01: Show the cart total\n\n**Status:** ready-for-agent\n\n## What to build\n\nShow the sum of the items in the cart.\n",
           warnings: [],
+          referencedPrs: [],
         },
         {
           file: "02-card-payment.md",
@@ -247,6 +301,7 @@ describe("readProject", () => {
           source:
             "# 02: Pay by card\n\nStatus: needs-triage\n\n## What to build\n\nTake a card payment for the cart total.\n",
           warnings: [],
+          referencedPrs: [],
         },
       ]);
     });
@@ -349,6 +404,7 @@ describe("readProject", () => {
           status: "ready-for-agent",
           source: await readFile(file, "utf8"),
           warnings: [],
+          referencedPrs: [],
         },
       ]);
     });
@@ -387,6 +443,197 @@ describe("readProject", () => {
     });
   });
 
+  describe("Referenced PRs", () => {
+    let dir: string;
+
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it("lists a Ticket's PR #N with the state the lookup reports, resolved against origin", async () => {
+      dir = await gitProject("referenced-prs", "git@github.com:acme/shop.git");
+      const { lookup } = fakeLookup({ "acme/shop#21": { title: "Cart total", state: "merged" } });
+
+      const { model } = await readUntouched(dir, { prLookup: lookup });
+
+      expect(model.features[0].tickets[0].referencedPrs).toEqual([
+        {
+          repo: "acme/shop",
+          number: 21,
+          title: "Cart total",
+          state: "merged",
+          url: "https://github.com/acme/shop/pull/21",
+        },
+      ]);
+    });
+
+    it("detects every keyword form in any case, once each, and ignores bare #N and PR N", async () => {
+      dir = await gitProject("referenced-prs", "https://github.com/acme/shop.git");
+      const known = Object.fromEntries(
+        [31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43].map((n) => [
+          `acme/shop#${n}`,
+          { title: `PR ${n}`, state: "open" as const },
+        ]),
+      );
+      const { lookup } = fakeLookup(known);
+
+      const { model } = await readUntouched(dir, { prLookup: lookup });
+
+      expect(model.features[0].tickets[1].referencedPrs.map((pr) => pr.number)).toEqual([
+        31, 32, 33, 34, 35, 36, 37, 38, 41, 42, 43,
+      ]);
+    });
+
+    it("resolves a github.com pull link in the Spec against the repo it names", async () => {
+      dir = await gitProject("referenced-prs", "git@github.com:acme/shop.git");
+      const { lookup } = fakeLookup({
+        "acme/payments#7": { title: "Payment intents", state: "closed" },
+        "acme-labs/sdk.js#12": { title: "Card tokens", state: "draft" },
+      });
+
+      const { model } = await readUntouched(dir, { prLookup: lookup });
+
+      expect(model.features[0].spec.referencedPrs).toEqual([
+        {
+          repo: "acme/payments",
+          number: 7,
+          title: "Payment intents",
+          state: "closed",
+          url: "https://github.com/acme/payments/pull/7",
+        },
+        {
+          repo: "acme-labs/sdk.js",
+          number: 12,
+          title: "Card tokens",
+          state: "draft",
+          url: "https://github.com/acme-labs/sdk.js/pull/12",
+        },
+      ]);
+    });
+
+    it("lists the Feature's Spec PRs, then each Ticket's PRs tagged with its Ticket", async () => {
+      dir = await gitProject("referenced-prs", "git@github.com:acme/shop.git");
+      const { lookup } = fakeLookup({
+        "acme/payments#7": { title: "Payment intents", state: "open" },
+        "acme/shop#21": { title: "Cart total", state: "merged" },
+        "acme/shop#31": { title: "Card form", state: "open" },
+      });
+
+      const { model } = await readUntouched(dir, { prLookup: lookup });
+
+      expect(model.features[0].referencedPrs).toEqual([
+        {
+          repo: "acme/payments",
+          number: 7,
+          title: "Payment intents",
+          state: "open",
+          url: "https://github.com/acme/payments/pull/7",
+        },
+        {
+          repo: "acme/shop",
+          number: 21,
+          title: "Cart total",
+          state: "merged",
+          url: "https://github.com/acme/shop/pull/21",
+          ticket: { file: "01-cart-total.md", number: 1, title: "Show the cart total" },
+        },
+        {
+          repo: "acme/shop",
+          number: 31,
+          title: "Card form",
+          state: "open",
+          url: "https://github.com/acme/shop/pull/31",
+          ticket: { file: "02-card-payment.md", number: 2, title: "Pay by card" },
+        },
+      ]);
+    });
+
+    it("drops a reference the lookup reports as an issue", async () => {
+      dir = await gitProject("referenced-prs", "git@github.com:acme/shop.git");
+      const { lookup } = fakeLookup({ "acme/shop#21": "issue" });
+
+      const { model } = await readUntouched(dir, { prLookup: lookup });
+
+      expect(model.features[0].tickets[0].referencedPrs).toEqual([]);
+    });
+
+    it("asks the lookup once for every distinct reference in the Project", async () => {
+      dir = await gitProject("referenced-prs", "git@github.com:acme/shop.git");
+      const { lookup, calls } = fakeLookup({});
+
+      await readUntouched(dir, { prLookup: lookup });
+
+      expect(calls).toEqual([
+        [
+          { repo: "acme/payments", number: 7 },
+          { repo: "acme-labs/sdk.js", number: 12 },
+          { repo: "acme/shop", number: 21 },
+          ...[31, 32, 33, 34, 35, 36, 37, 38, 41, 42, 43].map((number) => ({
+            repo: "acme/shop",
+            number,
+          })),
+        ],
+      ]);
+    });
+
+    it("does not call the lookup when no Spec or Ticket references a PR", async () => {
+      const { lookup, calls } = fakeLookup({});
+
+      await readUntouched(path.join(fixtures, "ticket-headers"), { prLookup: lookup });
+
+      expect(calls).toEqual([]);
+    });
+
+    it.each([
+      ["no origin remote", undefined],
+      ["an origin remote outside GitHub", "git@gitlab.com:acme/shop.git"],
+      ["an origin remote on a host ending in github.com", "https://notgithub.com/acme/shop.git"],
+    ])("drops #N references, keeps pull links and reports no error with %s", async (_, remote) => {
+      dir = await gitProject("referenced-prs", remote);
+      const { lookup, calls } = fakeLookup({
+        "acme/payments#7": { title: "Payment intents", state: "open" },
+      });
+
+      const { model } = await readUntouched(dir, { prLookup: lookup });
+
+      expect(calls).toEqual([
+        [
+          { repo: "acme/payments", number: 7 },
+          { repo: "acme-labs/sdk.js", number: 12 },
+        ],
+      ]);
+      expect(model.features[0].spec.referencedPrs.map((pr) => pr.number)).toEqual([7]);
+      expect(model.features[0].tickets.map((ticket) => ticket.referencedPrs)).toEqual([[], []]);
+      expect(model.prLookupError).toBeUndefined();
+    });
+
+    it("reads a Project that is not a git repository with no PR state and no error", async () => {
+      dir = await copiedProject("referenced-prs");
+      const { lookup, calls } = fakeLookup({});
+
+      const { model } = await readUntouched(dir, { prLookup: lookup });
+
+      expect(calls.flat().map((ref) => ref.repo)).toEqual(["acme/payments", "acme-labs/sdk.js"]);
+      expect(model.features[0].tickets.map((ticket) => ticket.referencedPrs)).toEqual([[], []]);
+      expect(model.prLookupError).toBeUndefined();
+    });
+
+    it("still reads the Project when the lookup fails, listing no PRs and naming the failure", async () => {
+      dir = await gitProject("referenced-prs", "git@github.com:acme/shop.git");
+      const failing: PrLookup = async () => {
+        throw new Error("gh: To get started with GitHub CLI, please run: gh auth login");
+      };
+
+      const { model } = await readUntouched(dir, { prLookup: failing });
+
+      expect(model.prLookupError).toBe(
+        "gh: To get started with GitHub CLI, please run: gh auth login",
+      );
+      expect(model.features[0].spec.referencedPrs).toEqual([]);
+      expect(model.features[0].tickets.map((ticket) => ticket.referencedPrs)).toEqual([[], []]);
+    });
+  });
+
   describe("with symlinks in the Tracker folder", () => {
     let dir: string;
 
@@ -407,7 +654,12 @@ describe("readProject", () => {
       const { model } = await readUntouched(projectPath, { root: dir });
 
       expect(model.features).toEqual([
-        { slug: "search", spec: { source: "# Search\n" }, tickets: [] },
+        {
+          slug: "search",
+          spec: { source: "# Search\n", referencedPrs: [] },
+          tickets: [],
+          referencedPrs: [],
+        },
       ]);
       expect(model.skipped).toEqual([]);
     });

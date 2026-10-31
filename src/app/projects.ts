@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { resolveConfigPath } from "../config/config.ts";
+import { ghPrLookup } from "../pr-lookup/gh.ts";
 import { type ProjectModel, readProject } from "../project-reader/project-reader.ts";
 import { openRegistry, type Project } from "../registry/registry.ts";
 
@@ -33,7 +34,7 @@ export async function readRegisteredProject(
     return {
       model: await readProject(project.path, {
         trackerFolder: project.trackerFolder,
-        prLookup: async () => [],
+        prLookup: ghPrLookup,
       }),
     };
   } catch (error) {
