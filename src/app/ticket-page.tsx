@@ -3,16 +3,19 @@ import type { Feature, Ticket } from "../project-reader/project-reader.ts";
 import type { Project } from "../registry/registry.ts";
 import { MarkdownArticle } from "./markdown.tsx";
 import { featureHref } from "./project-urls.ts";
+import { ReferencedPrs } from "./referenced-prs.tsx";
 import { WarningBadges } from "./warning-badges.tsx";
 
 export function TicketPage({
   project,
   feature,
   ticket,
+  prLookupError,
 }: {
   project: Project;
   feature: Feature;
   ticket: Ticket;
+  prLookupError?: string;
 }) {
   return (
     <>
@@ -31,6 +34,7 @@ export function TicketPage({
           <WarningBadges warnings={ticket.warnings} />
         </p>
       )}
+      <ReferencedPrs prs={ticket.referencedPrs} error={prLookupError} />
       <MarkdownArticle source={ticket.source} />
     </>
   );

@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { ifExists } from "../fs.ts";
+import type { PullRequest } from "./referenced-prs.ts";
 
 export type TicketWarning =
   | { kind: "heading-number-mismatch"; heading: string; filename: string }
@@ -15,7 +16,10 @@ export type Ticket = {
   status?: string;
   source: string;
   warnings: TicketWarning[];
+  referencedPrs: PullRequest[];
 };
+
+export type ParsedTicket = Omit<Ticket, "referencedPrs">;
 
 const TICKET_FILE = /^(\d+)-(.+)\.md$/;
 const HEADING = /^# (.+)$/m;
@@ -31,7 +35,7 @@ function headerOf(source: string): string {
   return section ? source.slice(0, section.index) : source;
 }
 
-function parseTicket({ file, number, slug }: TicketName, source: string): Ticket {
+function parseTicket({ file, number, slug }: TicketName, source: string): ParsedTicket {
   const header = headerOf(source);
   const heading = HEADING.exec(header)?.[1].trim();
   const numbered = heading === undefined ? undefined : NUMBERED_TITLE.exec(heading);
@@ -54,7 +58,7 @@ function parseTicket({ file, number, slug }: TicketName, source: string): Ticket
   };
 }
 
-function unreadableTicket({ file, number, slug }: TicketName, message: string): Ticket {
+function unreadableTicket({ file, number, slug }: TicketName, message: string): ParsedTicket {
   return {
     file,
     number: Number(number),
@@ -65,9 +69,9 @@ function unreadableTicket({ file, number, slug }: TicketName, message: string): 
 }
 
 // Tickets are the NN-<slug>.md files in a Feature's issues/ folder.
-export async function readTickets(featurePath: string): Promise<Ticket[]> {
+export async function readTickets(featurePath: string): Promise<ParsedTicket[]> {
   const issuesPath = path.join(featurePath, "issues");
-  const tickets: Ticket[] = [];
+  const tickets: ParsedTicket[] = [];
   for (const file of (await ifExists(readdir(issuesPath))) ?? []) {
     const match = TICKET_FILE.exec(file);
     if (!match) continue;

@@ -3,9 +3,18 @@ import type { Feature } from "../project-reader/project-reader.ts";
 import type { Project } from "../registry/registry.ts";
 import { MarkdownArticle } from "./markdown.tsx";
 import { projectHref, ticketHref } from "./project-urls.ts";
+import { ReferencedPrs } from "./referenced-prs.tsx";
 import { WarningBadges } from "./warning-badges.tsx";
 
-export function FeaturePage({ project, feature }: { project: Project; feature: Feature }) {
+export function FeaturePage({
+  project,
+  feature,
+  prLookupError,
+}: {
+  project: Project;
+  feature: Feature;
+  prLookupError?: string;
+}) {
   return (
     <>
       <p>
@@ -39,6 +48,11 @@ export function FeaturePage({ project, feature }: { project: Project; feature: F
           </tbody>
         </table>
       )}
+      <ReferencedPrs
+        prs={feature.referencedPrs}
+        error={prLookupError}
+        ticketHref={(ticket) => ticketHref(project, feature, ticket)}
+      />
     </>
   );
 }

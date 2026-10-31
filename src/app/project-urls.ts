@@ -35,7 +35,11 @@ export function pageHref(project: Project, pagePath: string): string {
 }
 
 // A Ticket is named by its file, so two files sharing a number stay distinct.
-export function ticketHref(project: Project, feature: Feature, ticket: Ticket): string {
+export function ticketHref(
+  project: Project,
+  feature: Feature,
+  ticket: Pick<Ticket, "file">,
+): string {
   return `${featureHref(project, feature.slug)}&ticket=${encodeURIComponent(ticket.file)}`;
 }
 

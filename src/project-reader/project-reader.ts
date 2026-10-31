@@ -1,21 +1,22 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { ifExists } from "../fs.ts";
-import { readTickets, type Ticket } from "./ticket.ts";
+import { lookUpReferencedPrs, type PrLookup, type PullRequest } from "./referenced-prs.ts";
+import { type ParsedTicket, readTickets, type Ticket } from "./ticket.ts";
 
-export type PullRequestRef = { repo: string; number: number };
-
-export type PullRequest = PullRequestRef & {
-  title: string;
-  state: "open" | "draft" | "merged" | "closed";
-  url: string;
-};
-
-export type PrLookup = (refs: PullRequestRef[]) => Promise<PullRequest[]>;
-
+export type { PrLookup, PullRequest, PullRequestRef } from "./referenced-prs.ts";
 export type { Ticket, TicketWarning } from "./ticket.ts";
 
-export type Feature = { slug: string; spec: { source: string }; tickets: Ticket[] };
+export type FeatureReferencedPr = PullRequest & {
+  ticket?: Pick<Ticket, "file" | "number" | "title">;
+};
+
+export type Feature = {
+  slug: string;
+  spec: { source: string; referencedPrs: PullRequest[] };
+  tickets: Ticket[];
+  referencedPrs: FeatureReferencedPr[];
+};
 
 export type ProjectLevelPageKind = "glossary" | "adr" | "tracker" | "out-of-scope";
 
@@ -32,6 +33,7 @@ export type ProjectModel = {
   features: Feature[];
   skipped: string[];
   pages: ProjectLevelPage[];
+  prLookupError?: string;
 };
 
 // The Tracker folder a Project without an override uses, relative to its folder.
@@ -111,17 +113,43 @@ export async function readProject(
   if (entries === undefined) {
     return { trackerFolder: { path: trackerPath, exists: false }, features: [], skipped: [], pages };
   }
-  const features: Feature[] = [];
+  const parsed: { slug: string; spec: string; tickets: ParsedTicket[] }[] = [];
   const skipped: string[] = [];
   for (const slug of entries.sort((a, b) => a.localeCompare(b))) {
     const directory = path.join(trackerPath, slug);
     if (!(await ifExists(stat(directory)))?.isDirectory()) continue;
     const spec = await readFileIfPresent(path.join(directory, "spec.md"));
     if (spec !== undefined) {
-      features.push({ slug, spec: { source: spec }, tickets: await readTickets(directory) });
+      parsed.push({ slug, spec, tickets: await readTickets(directory) });
     } else {
       skipped.push(slug);
     }
   }
-  return { trackerFolder: { path: trackerPath, exists: true }, features, skipped, pages };
+  const sources = parsed.flatMap(({ spec, tickets }) => [spec, ...tickets.map((t) => t.source)]);
+  const prIndex = await lookUpReferencedPrs(projectPath, sources, options.prLookup);
+  const features = parsed.map(({ slug, spec, tickets }): Feature => {
+    const specPrs = prIndex.prsIn(spec);
+    const withPrs = tickets.map((ticket) => ({
+      ...ticket,
+      referencedPrs: prIndex.prsIn(ticket.source),
+    }));
+    return {
+      slug,
+      spec: { source: spec, referencedPrs: specPrs },
+      tickets: withPrs,
+      referencedPrs: [
+        ...specPrs,
+        ...withPrs.flatMap(({ file, number, title, referencedPrs: prs }) =>
+          prs.map((pr) => ({ ...pr, ticket: { file, number, title } })),
+        ),
+      ],
+    };
+  });
+  return {
+    trackerFolder: { path: trackerPath, exists: true },
+    features,
+    skipped,
+    pages,
+    prLookupError: prIndex.error,
+  };
 }

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { resolveConfigPath } from "../config/config.ts";
+import { ghPrLookup } from "../pr-lookup/gh.ts";
 import { type ProjectModel, readProject } from "../project-reader/project-reader.ts";
 import { watchProject } from "../project-watcher/project-watcher.ts";
 import { openRegistry, type Project } from "../registry/registry.ts";
@@ -38,7 +39,7 @@ function folderOptions(project: Project): { trackerFolder?: string } {
 
 export async function readRegisteredProject(project: Project): Promise<ProjectRead> {
   try {
-    const options = { ...folderOptions(project), prLookup: async () => [] };
+    const options = { ...folderOptions(project), prLookup: ghPrLookup };
     return { model: await readProject(project.path, options) };
   } catch (error) {
     return { error: errorMessage(error) };
