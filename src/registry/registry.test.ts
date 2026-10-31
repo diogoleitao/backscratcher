@@ -117,6 +117,21 @@ describe("openRegistry", () => {
     }
   });
 
+  it("rejects adding the file system root, also through a symlink, without writing", async () => {
+    const root = path.parse(dir).root;
+    const link = path.join(dir, "root-link");
+    await symlink(root, link);
+
+    for (const target of [root, link]) {
+      await expect(openRegistry(configPath).add(target)).rejects.toThrow(
+        new RegistryError(
+          `${target} is the file system root, which cannot be a Project; add a folder inside it`,
+        ),
+      );
+    }
+    await expect(access(configPath)).rejects.toThrow();
+  });
+
   it("removes a Project whose parent folder became a file", async () => {
     const parent = path.join(dir, "projects");
     await openRegistry(configPath).add(projectDir);

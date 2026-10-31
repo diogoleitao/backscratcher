@@ -1,10 +1,12 @@
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
   readdir,
   readFile,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -87,6 +89,26 @@ describe("openConfig", () => {
     expect((await lstat(configPath)).isSymbolicLink()).toBe(true);
     expect(JSON.parse(await readFile(target, "utf8"))).toEqual({ settings: { port: 5050 } });
     expect(await readdir(path.dirname(target))).toEqual(["config.json"]);
+  });
+
+  it("writes through a symlink whose target is missing, creating the target and keeping the link", async () => {
+    const target = path.join(dir, "dotfiles", "backscratcher", "config.json");
+    await mkdir(path.dirname(configPath), { recursive: true });
+    await symlink(target, configPath);
+
+    await openConfig(configPath).set("port", 5050);
+
+    expect((await lstat(configPath)).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(await readFile(target, "utf8"))).toEqual({ settings: { port: 5050 } });
+  });
+
+  it("keeps the config file's mode when writing it", async () => {
+    await writeConfigFile("{}");
+    await chmod(configPath, 0o600);
+
+    await openConfig(configPath).set("port", 5050);
+
+    expect((await stat(configPath)).mode & 0o777).toBe(0o600);
   });
 
   it("survives two saves at once in one process, leaving no temp file", async () => {

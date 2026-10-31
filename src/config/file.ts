@@ -1,5 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readFile,
+  readlink,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { ifExists } from "../fs.ts";
 
@@ -12,6 +23,24 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 // The app's own config file, shared by the settings and the Project registry.
 // Each section's owner validates its section after loading.
 export type ConfigFile = Record<string, unknown>;
+
+// Linux's limit on links followed in one path before ELOOP; macOS stops at 32.
+const MAX_SYMLINK_HOPS = 40;
+
+// Where a write to the config file lands: the end of its symlink chain,
+// which need not exist yet (a dotfiles link on a new machine). A symlink loop
+// falls back to the config path itself.
+async function writeTarget(configPath: string): Promise<string> {
+  let target = configPath;
+  for (let hops = 0; hops < MAX_SYMLINK_HOPS; hops++) {
+    const stats = await ifExists(lstat(target));
+    if (!stats?.isSymbolicLink()) return target;
+    // A relative link is relative to the real folder holding it.
+    const folder = path.dirname(target);
+    target = path.resolve((await ifExists(realpath(folder))) ?? folder, await readlink(target));
+  }
+  return configPath;
+}
 
 export function openConfigFile(configPath: string) {
   return {
@@ -39,11 +68,14 @@ export function openConfigFile(configPath: string) {
     // file, so saves at once in one process (the server) do not collide. Two
     // writers at once can still lose one write: the last rename wins.
     async save(config: ConfigFile): Promise<void> {
-      const target = (await ifExists(realpath(configPath))) ?? configPath;
+      const target = await writeTarget(configPath);
       await mkdir(path.dirname(target), { recursive: true });
       const temp = `${target}.${randomUUID()}.tmp`;
+      // The rename replaces the file, so the temp file takes on its mode.
+      const mode = (await ifExists(stat(target)))?.mode;
       try {
         await writeFile(temp, `${JSON.stringify(config, null, 2)}\n`);
+        if (mode !== undefined) await chmod(temp, mode & 0o7777);
         await rename(temp, target);
       } catch (error) {
         await rm(temp, { force: true });

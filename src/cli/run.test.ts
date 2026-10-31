@@ -10,6 +10,7 @@ import { runCli } from "./run.ts";
 let dir: string;
 let configPath: string;
 let projectDir: string;
+let cwd: () => string;
 
 beforeEach(async () => {
   // Real path, so expected paths match the registry's canonical ones.
@@ -17,6 +18,7 @@ beforeEach(async () => {
   configPath = path.join(dir, "config.json");
   projectDir = path.join(dir, "project");
   await mkdir(projectDir);
+  cwd = () => projectDir;
 });
 
 afterEach(async () => {
@@ -35,7 +37,7 @@ async function cli(
   const code = await runCli(argv, {
     env,
     home: path.join(dir, "home"),
-    cwd: projectDir,
+    cwd,
     stdout: (text) => (stdout += text),
     stderr: (text) => (stderr += text),
     startServer: async ({ configPath, ...options }) => {
@@ -344,4 +346,34 @@ describe("backscratcher add and remove", () => {
     expect(result.stderr).not.toBe("");
     expect(await projects()).toEqual([]);
   });
+});
+
+describe("with the working directory deleted", () => {
+  beforeEach(() => {
+    cwd = () => {
+      throw systemError("ENOENT", "ENOENT: no such file or directory, uv_cwd");
+    };
+  });
+
+  it("prints the config and starts the server", async () => {
+    expect((await cli(["config", "--config", configPath])).code).toBe(0);
+    expect((await cli([])).started).toEqual([{ port: 4747, open: true }]);
+  });
+
+  it("adds and removes a Project named by absolute path", async () => {
+    expect((await cli(["add", projectDir, "--config", configPath])).code).toBe(0);
+    expect((await cli(["remove", projectDir, "--config", configPath])).code).toBe(0);
+  });
+
+  it.each([[["add"]], [["remove"]], [["add", "nested"]], [["config", "tracker", "docs"]]])(
+    "reports %j as one line, exiting 1",
+    async (argv) => {
+      const result = await cli([...argv, "--config", configPath]);
+      expect(result).toMatchObject({
+        code: 1,
+        stderr:
+          "backscratcher: the working directory no longer exists; cd into a folder, or pass the Project's absolute path\n",
+      });
+    },
+  );
 });
