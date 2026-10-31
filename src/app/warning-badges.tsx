@@ -9,6 +9,10 @@ function describe(warning: TicketWarning): string {
       return `Heading "${warning.heading}" has no Ticket number`;
     case "status-line-empty":
       return "Status line is empty";
+    case "blocked-by-unparseable":
+      return warning.line === ""
+        ? "Blocked by line is empty"
+        : `Blocked by line "${warning.line}" is not all Ticket numbers or titles; the graph may be missing an edge`;
     case "unreadable":
       return `Could not read the file: ${warning.message}`;
   }

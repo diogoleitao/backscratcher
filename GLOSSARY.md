@@ -43,3 +43,7 @@ _Avoid_: Linked PR, implementation PR
 **Blocker**:
 A Ticket in the same Feature that must be done before another Ticket can start.
 _Avoid_: Dependency, prerequisite
+
+**Broken Blocker reference**:
+An entry in a Ticket's `Blocked by:` line that names no other Ticket in the same Feature, kept and shown as broken rather than dropped.
+_Avoid_: Dangling dependency, missing Blocker
