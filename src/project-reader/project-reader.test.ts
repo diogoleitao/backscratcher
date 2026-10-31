@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { type PrLookup, readProject } from "./project-reader.ts";
+import { type PrLookup, readProject, type Ticket } from "./project-reader.ts";
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -235,6 +235,7 @@ describe("readProject", () => {
           number: 1,
           title: "Show the cart total",
           status: "ready-for-agent",
+          normalisedStatus: "ready-for-agent",
           source:
             "# 01: Show the cart total\n\n**Status:** ready-for-agent\n\n## What to build\n\nShow the sum of the items in the cart.\n",
           warnings: [],
@@ -244,6 +245,7 @@ describe("readProject", () => {
           number: 2,
           title: "Pay by card",
           status: "needs-triage",
+          normalisedStatus: "needs-triage",
           source:
             "# 02: Pay by card\n\nStatus: needs-triage\n\n## What to build\n\nTake a card payment for the cart total.\n",
           warnings: [],
@@ -337,6 +339,98 @@ describe("readProject", () => {
       ]);
     });
 
+    describe("Status normalisation", () => {
+      const statuses = (model: { features: { tickets: Ticket[] }[] }) =>
+        model.features[0].tickets.map(({ number, status, normalisedStatus }) => ({
+          number,
+          status,
+          normalisedStatus,
+        }));
+
+      it("classifies done and the default triage role strings", async () => {
+        const { model } = await readFixture("ticket-status-known");
+
+        expect(statuses(model)).toEqual([
+          { number: 1, status: "done", normalisedStatus: "done" },
+          { number: 2, status: "ready-for-agent", normalisedStatus: "ready-for-agent" },
+        ]);
+      });
+
+      it("strips backticks from the Status", async () => {
+        const { model } = await readFixture("ticket-status-backticked");
+
+        expect(statuses(model)).toEqual([
+          { number: 3, status: "`needs-info`", normalisedStatus: "needs-info" },
+        ]);
+      });
+
+      it("classifies a prose Status line from its first word before a . or ,", async () => {
+        const { model } = await readFixture("ticket-status-prose");
+
+        expect(statuses(model)).toEqual([
+          {
+            number: 4,
+            status: "done. Prevents a bug where the total went negative, see PR #12.",
+            normalisedStatus: "done",
+          },
+          {
+            number: 5,
+            status: "`wontfix`, the provider shut down",
+            normalisedStatus: "wontfix",
+          },
+        ]);
+      });
+
+      it("classifies a Status in any case", async () => {
+        const { model } = await readFixture("ticket-status-case");
+
+        expect(statuses(model)).toEqual([
+          { number: 1, status: "Done.", normalisedStatus: "done" },
+          { number: 2, status: "Ready-For-Agent", normalisedStatus: "ready-for-agent" },
+        ]);
+      });
+
+      it("classifies an unknown value as other, keeping the raw text", async () => {
+        const { model } = await readFixture("ticket-status-unknown");
+
+        expect(statuses(model)).toEqual([
+          { number: 6, status: "resolved", normalisedStatus: "other" },
+        ]);
+      });
+
+      it("classifies a Ticket without a Status line as none", async () => {
+        const { model } = await readFixture("ticket-status-missing");
+
+        expect(statuses(model)).toEqual([
+          { number: 7, status: undefined, normalisedStatus: "none" },
+        ]);
+      });
+
+      it("maps the Project's triage-labels.md labels back to their roles, in place of the defaults", async () => {
+        const { model } = await readFixture("custom-triage-labels");
+
+        expect(statuses(model)).toEqual([
+          { number: 1, status: "afk", normalisedStatus: "ready-for-agent" },
+          {
+            number: 2,
+            status: "`waiting-on-reporter`. Which card networks?",
+            normalisedStatus: "needs-info",
+          },
+          { number: 3, status: "ready-for-agent", normalisedStatus: "other" },
+          { number: 4, status: "done", normalisedStatus: "done" },
+        ]);
+      });
+
+      it("finds the triage-labels.md columns by their headers, in any order", async () => {
+        const { model } = await readFixture("triage-labels-reordered");
+
+        expect(statuses(model)).toEqual([
+          { number: 1, status: "afk", normalisedStatus: "ready-for-agent" },
+          { number: 2, status: "triage", normalisedStatus: "needs-triage" },
+        ]);
+      });
+    });
+
     it("tolerates acceptance criteria written twice and keeps the whole file", async () => {
       const { projectPath, model } = await readFixture("ticket-duplicated-criteria");
       const file = path.join(projectPath, ".scratch", "checkout", "issues", "02-receipt.md");
@@ -347,6 +441,7 @@ describe("readProject", () => {
           number: 2,
           title: "Email a receipt",
           status: "ready-for-agent",
+          normalisedStatus: "ready-for-agent",
           source: await readFile(file, "utf8"),
           warnings: [],
         },
