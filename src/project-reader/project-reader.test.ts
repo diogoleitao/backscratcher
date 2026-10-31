@@ -429,6 +429,16 @@ describe("readProject", () => {
           { number: 2, status: "triage", normalisedStatus: "needs-triage" },
         ]);
       });
+
+      it("keeps the default string for a role triage-labels.md does not list", async () => {
+        const { model } = await readFixture("triage-labels-partial");
+
+        expect(statuses(model)).toEqual([
+          { number: 1, status: "afk", normalisedStatus: "ready-for-agent" },
+          { number: 2, status: "ready-for-agent", normalisedStatus: "other" },
+          { number: 3, status: "needs-info", normalisedStatus: "needs-info" },
+        ]);
+      });
     });
 
     it("tolerates acceptance criteria written twice and keeps the whole file", async () => {

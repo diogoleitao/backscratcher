@@ -14,7 +14,7 @@ export function statusText({ status, normalisedStatus }: Ticket): string {
 }
 
 // The raw Status to show next to statusText, unless statusText already
-// includes it.
+// includes it or says the same thing.
 export function rawStatusBeside({ status, normalisedStatus }: Ticket): string | undefined {
-  return normalisedStatus === "other" ? undefined : status;
+  return normalisedStatus === "other" || status === normalisedStatus ? undefined : status;
 }

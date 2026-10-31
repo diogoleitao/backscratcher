@@ -19,16 +19,15 @@ export type TriageLabels = Map<string, TriageRole>;
 // The path of a Project's label mapping, relative to the Project.
 export const TRIAGE_LABELS_FILE = "docs/agents/triage-labels.md";
 
-const DEFAULT_TRIAGE_LABELS: TriageLabels = new Map(TRIAGE_ROLES.map((role) => [role, role]));
-
 const ROLE_HEADER = /label in mattpocock\/skills/i;
 const LABEL_HEADER = /label in our tracker/i;
 
 const unbacktick = (text: string) => text.replaceAll("`", "");
 
 // Reads the "Label in our tracker" column of triage-labels.md back to the
-// role in the "Label in mattpocock/skills" column. Without the file, or
-// without any mapping in it, the role strings themselves are the labels.
+// role in the "Label in mattpocock/skills" column. A role the file does not
+// list keeps its own string as its label, unless the file gives that string
+// to another role.
 export function triageLabels(source: string | undefined): TriageLabels {
   const labels: TriageLabels = new Map();
   let roleColumn = -1;
@@ -49,7 +48,11 @@ export function triageLabels(source: string | undefined): TriageLabels {
     const label = cells[labelColumn];
     if (role && label) labels.set(label.toLowerCase(), role);
   }
-  return labels.size > 0 ? labels : DEFAULT_TRIAGE_LABELS;
+  const mapped = new Set(labels.values());
+  for (const role of TRIAGE_ROLES) {
+    if (!mapped.has(role) && !labels.has(role)) labels.set(role, role);
+  }
+  return labels;
 }
 
 export function normaliseStatus(raw: string | undefined, labels: TriageLabels): NormalisedStatus {
