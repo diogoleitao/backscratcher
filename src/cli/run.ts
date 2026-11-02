@@ -35,10 +35,20 @@ type Args = ReturnType<typeof parseCliArgs>;
 class UsageError extends Error {}
 
 class WorkingDirectoryError extends Error {
-  constructor() {
-    super(
-      "the working directory no longer exists; cd into a folder, or pass the Project's absolute path",
-    );
+  // instead: what to pass in place of a path relative to the working directory.
+  constructor(instead: string) {
+    super(`the working directory no longer exists; cd into a folder, or pass ${instead}`);
+  }
+}
+
+function workingDirectory(deps: CliDeps, instead: string): string {
+  try {
+    return deps.cwd();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new WorkingDirectoryError(instead);
+    }
+    throw error;
   }
 }
 
@@ -103,12 +113,17 @@ const PROJECT_CONFIG: Record<
 
 async function dispatch(argv: string[], deps: CliDeps): Promise<number> {
   const args = parseCliArgs(argv);
+  const configPath = resolveConfigPath({
+    home: deps.home,
+    envPath: deps.env.BACKSCRATCHER_CONFIG,
+    flagPath: args.values.config,
+  });
+  // Absolute, so the server still finds it after leaving a deleted working
+  // directory.
   const config = openConfig(
-    resolveConfigPath({
-      home: deps.home,
-      envPath: deps.env.BACKSCRATCHER_CONFIG,
-      flagPath: args.values.config,
-    }),
+    path.isAbsolute(configPath)
+      ? configPath
+      : path.resolve(workingDirectory(deps, "an absolute config file path"), configPath),
   );
   const [command, ...operands] = args.positionals;
   const invocation = { args, operands, config, deps };
@@ -191,14 +206,7 @@ async function runConfigTracker(
 // works after that folder was deleted.
 function projectPathOf(deps: CliDeps, target: string | undefined): string {
   if (target !== undefined && path.isAbsolute(target)) return path.resolve(target);
-  let cwd;
-  try {
-    cwd = deps.cwd();
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new WorkingDirectoryError();
-    throw error;
-  }
-  return resolveProjectPath(cwd, target);
+  return resolveProjectPath(workingDirectory(deps, "the Project's absolute path"), target);
 }
 
 async function runConfigSet(

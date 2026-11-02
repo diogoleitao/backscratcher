@@ -102,6 +102,35 @@ describe("openConfig", () => {
     expect(JSON.parse(await readFile(target, "utf8"))).toEqual({ settings: { port: 5050 } });
   });
 
+  it("writes through a relative symlink inside a symlinked folder, resolving it from the real folder", async () => {
+    const realFolder = path.join(dir, "dotfiles", "backscratcher");
+    await mkdir(realFolder, { recursive: true });
+    await symlink(realFolder, path.dirname(configPath));
+    await symlink(path.join("..", "shared", "bs.json"), path.join(realFolder, "config.json"));
+
+    await openConfig(configPath).set("port", 5050);
+
+    expect((await lstat(path.join(realFolder, "config.json"))).isSymbolicLink()).toBe(true);
+    expect(
+      JSON.parse(await readFile(path.join(dir, "dotfiles", "shared", "bs.json"), "utf8")),
+    ).toEqual({ settings: { port: 5050 } });
+  });
+
+  it("rejects a config file that is a symlink loop, keeping the links", async () => {
+    const other = path.join(dir, "other.json");
+    await mkdir(path.dirname(configPath), { recursive: true });
+    await symlink(other, configPath);
+    await symlink(configPath, other);
+
+    const message = `config file ${configPath} is a symlink loop or too long a chain of links`;
+    await expect(openConfig(configPath).settings()).rejects.toThrow(new ConfigError(message));
+    await expect(openConfig(configPath).set("port", 5050)).rejects.toThrow(
+      new ConfigError(message),
+    );
+    expect((await lstat(configPath)).isSymbolicLink()).toBe(true);
+    expect((await lstat(other)).isSymbolicLink()).toBe(true);
+  });
+
   it("keeps the config file's mode when writing it", async () => {
     await writeConfigFile("{}");
     await chmod(configPath, 0o600);

@@ -104,6 +104,14 @@ describe("backscratcher (start)", () => {
     expect((await cli(["--config", configPath])).configPaths).toEqual([configPath]);
   });
 
+  it("gives the server a relative config file as an absolute path", async () => {
+    const absolute = path.join(projectDir, "cfg.json");
+    expect((await cli(["--config", "cfg.json"])).configPaths).toEqual([absolute]);
+    expect((await cli([], { BACKSCRATCHER_CONFIG: "cfg.json" })).configPaths).toEqual([
+      absolute,
+    ]);
+  });
+
   it("--no-open overrides a configured open", async () => {
     await cli(["config", "open", "true", "--config", configPath]);
     expect((await cli(["--no-open", "--config", configPath])).started).toEqual([
@@ -376,4 +384,18 @@ describe("with the working directory deleted", () => {
       });
     },
   );
+
+  it.each([
+    [["--config", "cfg.json"], {}],
+    [["config", "--config", "cfg.json"], {}],
+    [[], { BACKSCRATCHER_CONFIG: "cfg.json" }],
+  ])("reports a relative config file in %j %j as one line, exiting 1", async (argv, env) => {
+    const result = await cli(argv, env);
+    expect(result).toMatchObject({
+      code: 1,
+      stderr:
+        "backscratcher: the working directory no longer exists; cd into a folder, or pass an absolute config file path\n",
+      started: [],
+    });
+  });
 });

@@ -27,9 +27,14 @@ export type ConfigFile = Record<string, unknown>;
 // Linux's limit on links followed in one path before ELOOP; macOS stops at 32.
 const MAX_SYMLINK_HOPS = 40;
 
+function loopError(configPath: string): ConfigError {
+  return new ConfigError(
+    `config file ${configPath} is a symlink loop or too long a chain of links`,
+  );
+}
+
 // Where a write to the config file lands: the end of its symlink chain,
-// which need not exist yet (a dotfiles link on a new machine). A symlink loop
-// falls back to the config path itself.
+// which need not exist yet (a dotfiles link on a new machine).
 async function writeTarget(configPath: string): Promise<string> {
   let target = configPath;
   for (let hops = 0; hops < MAX_SYMLINK_HOPS; hops++) {
@@ -39,15 +44,21 @@ async function writeTarget(configPath: string): Promise<string> {
     const folder = path.dirname(target);
     target = path.resolve((await ifExists(realpath(folder))) ?? folder, await readlink(target));
   }
-  return configPath;
+  throw loopError(configPath);
 }
 
 export function openConfigFile(configPath: string) {
   return {
     path: configPath,
 
+    // A loop is not a missing file: read as empty, the next save would write
+    // over the file at the end of a chain the OS stopped following.
     async load(): Promise<ConfigFile> {
-      const text = await ifExists(readFile(configPath, "utf8"));
+      const text = await ifExists(
+        readFile(configPath, "utf8").catch((error: NodeJS.ErrnoException) => {
+          throw error.code === "ELOOP" ? loopError(configPath) : error;
+        }),
+      );
       if (text === undefined) return {};
 
       let config: unknown;
@@ -71,10 +82,14 @@ export function openConfigFile(configPath: string) {
       const target = await writeTarget(configPath);
       await mkdir(path.dirname(target), { recursive: true });
       const temp = `${target}.${randomUUID()}.tmp`;
-      // The rename replaces the file, so the temp file takes on its mode.
+      // The rename replaces the file, so the temp file takes on its mode. It is
+      // created with it, so a 0600 config is never readable by others; the
+      // chmod restores what the umask took off.
       const mode = (await ifExists(stat(target)))?.mode;
       try {
-        await writeFile(temp, `${JSON.stringify(config, null, 2)}\n`);
+        await writeFile(temp, `${JSON.stringify(config, null, 2)}\n`, {
+          mode: mode === undefined ? undefined : mode & 0o777,
+        });
         if (mode !== undefined) await chmod(temp, mode & 0o7777);
         await rename(temp, target);
       } catch (error) {
