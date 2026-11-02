@@ -61,6 +61,7 @@ describe("readProject", () => {
           slug: "checkout",
           spec: { source: "# Checkout\n\nLet a shopper pay for the items in their cart.\n" },
           tickets: [],
+          warnings: [],
         },
       ],
       skipped: [],
@@ -72,21 +73,24 @@ describe("readProject", () => {
     const { model } = await readFixture("no-spec-no-issues");
 
     expect(model.features).toEqual([]);
-    expect(model.skipped).toEqual(["notes"]);
+    expect(model.skipped).toEqual([{ slug: "notes", reason: "no-spec" }]);
   });
 
   it("skips a directory without spec.md that has issues/, and ignores loose files", async () => {
     const { model } = await readFixture("no-spec-with-issues");
 
     expect(model.features).toEqual([]);
-    expect(model.skipped).toEqual(["legacy"]);
+    expect(model.skipped).toEqual([{ slug: "legacy", reason: "no-spec" }]);
   });
 
   it("lists Features and skipped directories in name order", async () => {
     const { model } = await readFixture("several-directories");
 
     expect(model.features.map((feature) => feature.slug)).toEqual(["checkout", "search"]);
-    expect(model.skipped).toEqual(["archive", "zeta"]);
+    expect(model.skipped).toEqual([
+      { slug: "archive", reason: "no-spec" },
+      { slug: "zeta", reason: "no-spec" },
+    ]);
   });
 
   it("orders names by letter regardless of case", async () => {
@@ -99,7 +103,7 @@ describe("readProject", () => {
     const { model } = await readFixture("spec-is-directory");
 
     expect(model.features).toEqual([]);
-    expect(model.skipped).toEqual(["odd"]);
+    expect(model.skipped).toEqual([{ slug: "odd", reason: "no-spec" }]);
   });
 
   it("reads the overridden Tracker folder, relative to the Project, in place of .scratch/", async () => {
@@ -107,7 +111,7 @@ describe("readProject", () => {
 
     expect(model).toEqual({
       trackerFolder: { path: path.join(projectPath, "docs", "tickets"), exists: true },
-      features: [{ slug: "billing", spec: { source: "# Billing\n" }, tickets: [] }],
+      features: [{ slug: "billing", spec: { source: "# Billing\n" }, tickets: [], warnings: [] }],
       skipped: [],
       pages: [{ kind: "tracker", path: "docs/tickets/index.md", source: "# Tickets\n" }],
     });
@@ -619,6 +623,117 @@ describe("readProject", () => {
     });
   });
 
+  describe("with an unreadable folder or Spec", () => {
+    let dir: string;
+    let locked: string[] = [];
+
+    // rm cannot descend into a folder with mode 000, so modes are restored first.
+    afterEach(async () => {
+      for (const lockedPath of locked) await chmod(lockedPath, 0o755);
+      locked = [];
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    async function lock(lockedPath: string) {
+      await chmod(lockedPath, 0o000);
+      locked.push(lockedPath);
+    }
+
+    // chmod 000 does not block reads on Windows, where it only sets the
+    // read-only bit, or for root, which ignores file modes.
+    const modesBlockReads = process.platform !== "win32" && process.getuid?.() !== 0;
+
+    // A Project with a readable Feature, `search`, beside `checkout`.
+    async function projectWithCheckout(): Promise<string> {
+      dir = await realpath(await mkdtemp(path.join(tmpdir(), "backscratcher-reader-")));
+      const checkoutPath = path.join(dir, ".scratch", "checkout");
+      await mkdir(path.join(checkoutPath, "issues"), { recursive: true });
+      await writeFile(path.join(checkoutPath, "spec.md"), "# Checkout\n");
+      await writeFile(path.join(checkoutPath, "issues", "01-cart-total.md"), "# 01: Cart total\n");
+      await mkdir(path.join(dir, ".scratch", "search"));
+      await writeFile(path.join(dir, ".scratch", "search", "spec.md"), "# Search\n");
+      return checkoutPath;
+    }
+
+    it.skipIf(!modesBlockReads)(
+      "lists a Feature whose issues/ folder cannot be read, with a warning naming the problem",
+      async () => {
+        const checkoutPath = await projectWithCheckout();
+        await lock(path.join(checkoutPath, "issues"));
+
+        const model = await readProject(dir, { prLookup: noPrs });
+
+        expect(model.features).toEqual([
+          {
+            slug: "checkout",
+            spec: { source: "# Checkout\n" },
+            tickets: [],
+            warnings: [{ kind: "issues-unreadable", message: expect.stringContaining("EACCES") }],
+          },
+          { slug: "search", spec: { source: "# Search\n" }, tickets: [], warnings: [] },
+        ]);
+      },
+    );
+
+    it.skipIf(!modesBlockReads)(
+      "lists a Feature whose spec.md cannot be read, with a warning naming the problem",
+      async () => {
+        const checkoutPath = await projectWithCheckout();
+        await lock(path.join(checkoutPath, "spec.md"));
+
+        const model = await readProject(dir, { prLookup: noPrs });
+
+        expect(model.features[0].spec).toEqual({ source: undefined });
+        expect(model.features).toMatchObject([
+          {
+            slug: "checkout",
+            tickets: [{ file: "01-cart-total.md", title: "Cart total" }],
+            warnings: [{ kind: "spec-unreadable", message: expect.stringContaining("EACCES") }],
+          },
+          { slug: "search", spec: { source: "# Search\n" }, tickets: [], warnings: [] },
+        ]);
+        expect(model.skipped).toEqual([]);
+      },
+    );
+
+    it.skipIf(!modesBlockReads)(
+      "skips a Feature directory that cannot be read, with a reason naming the problem",
+      async () => {
+        const checkoutPath = await projectWithCheckout();
+        await lock(checkoutPath);
+
+        const model = await readProject(dir, { prLookup: noPrs });
+
+        expect(model.features.map((feature) => feature.slug)).toEqual(["search"]);
+        expect(model.skipped).toEqual([
+          { slug: "checkout", reason: "unreadable", message: expect.stringContaining("EACCES") },
+        ]);
+      },
+    );
+
+    it.skipIf(!modesBlockReads)(
+      "reports a Tracker folder that cannot be read, and still reads the Project-level pages",
+      async () => {
+        await projectWithCheckout();
+        await writeFile(path.join(dir, "GLOSSARY.md"), "# Glossary\n");
+        await lock(path.join(dir, ".scratch"));
+
+        const model = await readProject(dir, { prLookup: noPrs });
+
+        expect(model).toEqual({
+          trackerFolder: {
+            path: path.join(dir, ".scratch"),
+            exists: true,
+            unreadable: expect.stringContaining("EACCES"),
+          },
+          features: [],
+          skipped: [],
+          pages: [{ kind: "glossary", path: "GLOSSARY.md", source: "# Glossary\n" }],
+        });
+      },
+    );
+  });
+
   describe("with symlinks in the Tracker folder", () => {
     let dir: string;
 
@@ -639,7 +754,7 @@ describe("readProject", () => {
       const { model } = await readUntouched(projectPath, { root: dir });
 
       expect(model.features).toEqual([
-        { slug: "search", spec: { source: "# Search\n" }, tickets: [] },
+        { slug: "search", spec: { source: "# Search\n" }, tickets: [], warnings: [] },
       ]);
       expect(model.skipped).toEqual([]);
     });

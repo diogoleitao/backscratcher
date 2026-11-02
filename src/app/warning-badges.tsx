@@ -1,7 +1,9 @@
 import { Fragment } from "react";
-import type { TicketWarning } from "../project-reader/project-reader.ts";
+import type { FeatureWarning, TicketWarning } from "../project-reader/project-reader.ts";
 
-function describe(warning: TicketWarning): string {
+type Warning = FeatureWarning | TicketWarning;
+
+function describe(warning: Warning): string {
   switch (warning.kind) {
     case "heading-number-mismatch":
       return `Heading says #${warning.heading} but the filename says #${warning.filename}`;
@@ -15,10 +17,14 @@ function describe(warning: TicketWarning): string {
         : `Blocked by line "${warning.line}" is not all Ticket numbers or titles; the graph may be missing an edge`;
     case "unreadable":
       return `Could not read the file: ${warning.message}`;
+    case "spec-unreadable":
+      return `Could not read spec.md: ${warning.message}`;
+    case "issues-unreadable":
+      return `Could not read the issues/ folder: ${warning.message}`;
   }
 }
 
-export function WarningBadges({ warnings }: { warnings: TicketWarning[] }) {
+export function WarningBadges({ warnings }: { warnings: Warning[] }) {
   return warnings.map((warning, index) => (
     <Fragment key={index}>
       {index > 0 && " "}
