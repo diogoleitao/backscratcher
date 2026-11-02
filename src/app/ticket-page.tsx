@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Feature, Ticket } from "../project-reader/project-reader.ts";
 import type { Project } from "../registry/registry.ts";
+import { BlockerLinks } from "./blocker-links.tsx";
 import { MarkdownArticle } from "./markdown.tsx";
 import { featureHref } from "./project-urls.ts";
 import { rawStatusBeside, statusText } from "./status-text.ts";
@@ -34,6 +35,11 @@ export function TicketPage({
           </>
         )}
       </p>
+      {(ticket.blockers.length > 0 || ticket.brokenBlockers.length > 0) && (
+        <p>
+          Blocked by: <BlockerLinks project={project} feature={feature} ticket={ticket} />
+        </p>
+      )}
       {ticket.warnings.length > 0 && (
         <p>
           <WarningBadges warnings={ticket.warnings} />
