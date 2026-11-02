@@ -535,12 +535,13 @@ describe("readProject", () => {
 describe("watchedFolders", () => {
   const projectPath = path.join(path.sep, "work", "shop");
 
-  it("watches the Tracker folder recursively and each Project-level page folder on its own", () => {
+  it("watches the Tracker folder recursively, and each Project-level page folder and the triage-labels.md folder on its own", () => {
     expect(watchedFolders(projectPath, {})).toEqual([
       { path: path.join(projectPath, ".scratch"), recursive: true },
       { path: projectPath, recursive: false },
       { path: path.join(projectPath, "docs", "adr"), recursive: false },
       { path: path.join(projectPath, ".out-of-scope"), recursive: false },
+      { path: path.join(projectPath, "docs", "agents"), recursive: false },
     ]);
   });
 
@@ -549,6 +550,7 @@ describe("watchedFolders", () => {
       { path: projectPath, recursive: true },
       { path: path.join(projectPath, "docs", "adr"), recursive: false },
       { path: path.join(projectPath, ".out-of-scope"), recursive: false },
+      { path: path.join(projectPath, "docs", "agents"), recursive: false },
     ]);
   });
 

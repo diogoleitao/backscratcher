@@ -72,14 +72,16 @@ function pageSourceEntries(projectPath: string, trackerPath: string) {
 export type WatchedFolder = { path: string; recursive: boolean };
 
 // The folders whose contents readProject reads: everything under the Tracker
-// folder, and the entries directly inside each Project-level page folder.
+// folder, and the entries directly inside each Project-level page folder and
+// the folder holding triage-labels.md.
 export function watchedFolders(
   projectPath: string,
   options: { trackerFolder?: string },
 ): WatchedFolder[] {
   const trackerPath = resolveTrackerPath(projectPath, options.trackerFolder);
   const folders: WatchedFolder[] = [{ path: trackerPath, recursive: true }];
-  for (const [, { folder }] of pageSourceEntries(projectPath, trackerPath)) {
+  const pageFolders = pageSourceEntries(projectPath, trackerPath).map(([, { folder }]) => folder);
+  for (const folder of [...pageFolders, path.dirname(TRIAGE_LABELS_FILE)]) {
     const folderPath = path.resolve(projectPath, folder);
     if (!folders.some((watched) => watched.path === folderPath)) {
       folders.push({ path: folderPath, recursive: false });

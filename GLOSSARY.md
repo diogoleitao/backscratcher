@@ -33,8 +33,16 @@ One numbered unit of work inside a Feature, stored as its own markdown file.
 _Avoid_: Issue, task, story
 
 **Status**:
-Where a Ticket stands, as one of the five triage roles, done, or another value the app shows as written.
+Where a Ticket stands, as one of the five Triage roles, done, or another value the app shows as written; the app reads it from the Ticket's `Status:` line and shows the line's text as written next to it.
 _Avoid_: State, label, stage
+
+**Triage role**:
+One of the five roles the skills use to triage work: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human` and `wontfix`.
+_Avoid_: Triage state, triage status
+
+**Triage label**:
+The string a Project's tracker uses for a Triage role, taken from its `docs/agents/triage-labels.md` and otherwise the role's own string.
+_Avoid_: Tag, alias
 
 **Referenced PR**:
 A GitHub pull request that a Spec or Ticket names explicitly; the reference alone does not mean the PR implements it.
