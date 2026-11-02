@@ -31,9 +31,12 @@ const STATUS_LINE = /^(?:\*\*status:\*\*|\*\*status\*\*:|status:)[ \t]*(.*)$/im;
 const BLOCKED_BY_LINE = /^(?:\*\*blocked by:\*\*|\*\*blocked by\*\*:|blocked by:)[ \t]*(.*)$/im;
 // Prose after "None" or "nothing" may still name Tickets, so it is not read.
 const NO_BLOCKERS = /^(?:(?:none|nothing|n\/a)\b|\(none\)|-$)/i;
-// A number alone, or followed by its title as in `01: Title` or `#01 (Title)`.
-// The number alone decides which Ticket it names.
-const NUMBER_ENTRY = /^#?(\d+)(?:\s*[:(].*)?$/;
+// A number alone, or followed by its title as in `01: Title`, `01 - Title` or
+// `#01 (Title)`. The number alone decides which Tickets it names.
+const NUMBER_ENTRY = /^#?(\d+)(?:\s*[:(].*|\s+-\s+.*)?$/;
+// A number then text, as in `#01 Title`, names a Ticket only when the text is
+// that Ticket's title, so `01 and 02` is not read as 01.
+const NUMBER_THEN_TITLE = /^#?(\d+)\s+(.+)$/;
 // Sentence breaks and links mark an entry as prose rather than a number or title.
 const PROSE = /;|[.!?]\s|https?:\/\/|\]\(/;
 
@@ -83,9 +86,10 @@ function parseTicket(
 
 const sameTitle = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
-// An entry that is prose rather than a number or title, or that starts with a
-// number but names no Ticket, is left out and the whole line is flagged, since
-// the graph may be missing an edge. A Ticket never blocks itself.
+// An entry names every other Ticket with its number, file name or title, so a
+// number shared by two files links to both. An entry that is prose, or that
+// starts with a number but names no Ticket, is left out and the whole line is
+// flagged, since the graph may be missing an edge. A Ticket never blocks itself.
 function resolveBlockers({ blockedBy, ...ticket }: ParsedTicket, tickets: ParsedTicket[]): Ticket {
   const others = tickets.filter((other) => other.file !== ticket.file);
   const blockers: string[] = [];
@@ -100,16 +104,21 @@ function resolveBlockers({ blockedBy, ...ticket }: ParsedTicket, tickets: Parsed
       continue;
     }
     const numbered = NUMBER_ENTRY.exec(entry);
-    const blocker = numbered
-      ? others.find((other) => other.number === Number(numbered[1]))
-      : others.find((other) => sameTitle(other.title, entry));
-    if (blocker) {
+    const titled = NUMBER_THEN_TITLE.exec(entry);
+    const named = numbered
+      ? others.filter((other) => other.number === Number(numbered[1]))
+      : others.filter(
+          (other) =>
+            other.file === entry ||
+            sameTitle(other.title, entry) ||
+            (titled !== null && other.number === Number(titled[1]) && sameTitle(other.title, titled[2])),
+        );
+    for (const blocker of named) {
       if (!blockers.includes(blocker.file)) blockers.push(blocker.file);
-    } else if (!numbered && /^#?\d/.test(entry)) {
-      unparseable = true;
-    } else {
-      brokenBlockers.push(entry);
     }
+    if (named.length > 0) continue;
+    if (!numbered && /^#?\d/.test(entry)) unparseable = true;
+    else brokenBlockers.push(entry);
   }
   const warnings: TicketWarning[] = unparseable
     ? [...ticket.warnings, { kind: "blocked-by-unparseable", line: blockedBy ?? "" }]

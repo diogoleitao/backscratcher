@@ -469,13 +469,29 @@ describe("readProject", () => {
     const blockersOf = (tickets: { number: number; blockers: string[]; brokenBlockers: string[] }[]) =>
       tickets.map(({ number, blockers, brokenBlockers }) => ({ number, blockers, brokenBlockers }));
 
-    it("resolves Blockers written by number, from bold and plain header lines only", async () => {
+    it("resolves Blockers written by number or file name, from bold and plain header lines only", async () => {
       const { model } = await readFixture("ticket-blockers-by-number");
 
       expect(blockersOf(model.features[0].tickets)).toEqual([
         { number: 1, blockers: [], brokenBlockers: [] },
         { number: 2, blockers: ["01-cart-total.md"], brokenBlockers: [] },
         { number: 3, blockers: ["01-cart-total.md", "02-card-payment.md"], brokenBlockers: [] },
+        {
+          number: 4,
+          blockers: ["01-cart-total.md", "02-card-payment.md", "03-receipt.md"],
+          brokenBlockers: [],
+        },
+      ]);
+      expect(model.features[0].tickets.flatMap((ticket) => ticket.warnings)).toEqual([]);
+    });
+
+    it("links a number shared by two Tickets to both of them", async () => {
+      const { model } = await readFixture("ticket-blockers-shared-number");
+
+      expect(blockersOf(model.features[0].tickets)).toEqual([
+        { number: 3, blockers: [], brokenBlockers: [] },
+        { number: 3, blockers: [], brokenBlockers: [] },
+        { number: 4, blockers: ["03-invoice.md", "03-receipt.md"], brokenBlockers: [] },
       ]);
       expect(model.features[0].tickets.flatMap((ticket) => ticket.warnings)).toEqual([]);
     });
