@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { ifExists } from "../fs.ts";
+import { TRIAGE_LABELS_FILE, triageLabels } from "./status.ts";
 import { readTickets, type Ticket } from "./ticket.ts";
 
 export type PullRequestRef = { repo: string; number: number };
@@ -13,6 +14,7 @@ export type PullRequest = PullRequestRef & {
 
 export type PrLookup = (refs: PullRequestRef[]) => Promise<PullRequest[]>;
 
+export type { NormalisedStatus } from "./status.ts";
 export type { Ticket, TicketWarning } from "./ticket.ts";
 
 export type Feature = { slug: string; spec: { source: string }; tickets: Ticket[] };
@@ -70,14 +72,16 @@ function pageSourceEntries(projectPath: string, trackerPath: string) {
 export type WatchedFolder = { path: string; recursive: boolean };
 
 // The folders whose contents readProject reads: everything under the Tracker
-// folder, and the entries directly inside each Project-level page folder.
+// folder, and the entries directly inside each Project-level page folder and
+// the folder holding triage-labels.md.
 export function watchedFolders(
   projectPath: string,
   options: { trackerFolder?: string },
 ): WatchedFolder[] {
   const trackerPath = resolveTrackerPath(projectPath, options.trackerFolder);
   const folders: WatchedFolder[] = [{ path: trackerPath, recursive: true }];
-  for (const [, { folder }] of pageSourceEntries(projectPath, trackerPath)) {
+  const pageFolders = pageSourceEntries(projectPath, trackerPath).map(([, { folder }]) => folder);
+  for (const folder of [...pageFolders, path.dirname(TRIAGE_LABELS_FILE)]) {
     const folderPath = path.resolve(projectPath, folder);
     if (!folders.some((watched) => watched.path === folderPath)) {
       folders.push({ path: folderPath, recursive: false });
@@ -111,6 +115,7 @@ export async function readProject(
   if (entries === undefined) {
     return { trackerFolder: { path: trackerPath, exists: false }, features: [], skipped: [], pages };
   }
+  const labels = triageLabels(await readFileIfPresent(path.join(projectPath, TRIAGE_LABELS_FILE)));
   const features: Feature[] = [];
   const skipped: string[] = [];
   for (const slug of entries.sort((a, b) => a.localeCompare(b))) {
@@ -118,7 +123,7 @@ export async function readProject(
     if (!(await ifExists(stat(directory)))?.isDirectory()) continue;
     const spec = await readFileIfPresent(path.join(directory, "spec.md"));
     if (spec !== undefined) {
-      features.push({ slug, spec: { source: spec }, tickets: await readTickets(directory) });
+      features.push({ slug, spec: { source: spec }, tickets: await readTickets(directory, labels) });
     } else {
       skipped.push(slug);
     }
