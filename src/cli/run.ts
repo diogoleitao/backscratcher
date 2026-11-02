@@ -1,3 +1,4 @@
+import path from "node:path";
 import { parseArgs } from "node:util";
 import {
   isSettingKey,
@@ -21,7 +22,8 @@ import { resolveServerOptions, type ServerOptions } from "../server/options.ts";
 export type CliDeps = {
   env: Record<string, string | undefined>;
   home: string;
-  cwd: string;
+  // Read only when a command needs it: the shell's folder may have been deleted.
+  cwd: () => string;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   startServer: (options: ServerOptions & { configPath: string }) => Promise<void>;
@@ -31,6 +33,24 @@ type Config = ReturnType<typeof openConfig>;
 type Args = ReturnType<typeof parseCliArgs>;
 
 class UsageError extends Error {}
+
+class WorkingDirectoryError extends Error {
+  // instead: what to pass in place of a path relative to the working directory.
+  constructor(instead: string) {
+    super(`the working directory no longer exists; cd into a folder, or pass ${instead}`);
+  }
+}
+
+function workingDirectory(deps: CliDeps, instead: string): string {
+  try {
+    return deps.cwd();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new WorkingDirectoryError(instead);
+    }
+    throw error;
+  }
+}
 
 // Node's errors from the file system and sockets (EISDIR, EACCES, ...).
 function isSystemError(error: unknown): error is NodeJS.ErrnoException {
@@ -58,6 +78,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
     if (
       error instanceof ConfigError ||
       error instanceof RegistryError ||
+      error instanceof WorkingDirectoryError ||
       isSystemError(error)
     ) {
       deps.stderr(`backscratcher: ${error.message}\n`);
@@ -92,12 +113,17 @@ const PROJECT_CONFIG: Record<
 
 async function dispatch(argv: string[], deps: CliDeps): Promise<number> {
   const args = parseCliArgs(argv);
+  const configPath = resolveConfigPath({
+    home: deps.home,
+    envPath: deps.env.BACKSCRATCHER_CONFIG,
+    flagPath: args.values.config,
+  });
+  // Absolute, so the server still finds it after leaving a deleted working
+  // directory.
   const config = openConfig(
-    resolveConfigPath({
-      home: deps.home,
-      envPath: deps.env.BACKSCRATCHER_CONFIG,
-      flagPath: args.values.config,
-    }),
+    path.isAbsolute(configPath)
+      ? configPath
+      : path.resolve(workingDirectory(deps, "an absolute config file path"), configPath),
   );
   const [command, ...operands] = args.positionals;
   const invocation = { args, operands, config, deps };
@@ -163,7 +189,7 @@ async function runConfigTracker(
   if (args.values.unset) {
     const [target, ...extra] = values;
     rejectExtra(extra);
-    await registry.clearTrackerFolder(resolveProjectPath(deps.cwd, target));
+    await registry.clearTrackerFolder(projectPathOf(deps, target));
     return 0;
   }
   const [trackerFolder, target, ...extra] = values;
@@ -171,8 +197,16 @@ async function runConfigTracker(
     throw new UsageError("config tracker takes a folder, or --unset");
   }
   rejectExtra(extra);
-  await registry.setTrackerFolder(resolveProjectPath(deps.cwd, target), trackerFolder);
+  await registry.setTrackerFolder(projectPathOf(deps, target), trackerFolder);
   return 0;
+}
+
+// The Project a path argument names, the working directory when none is
+// given. An absolute path does not read the working directory, so it still
+// works after that folder was deleted.
+function projectPathOf(deps: CliDeps, target: string | undefined): string {
+  if (target !== undefined && path.isAbsolute(target)) return path.resolve(target);
+  return resolveProjectPath(workingDirectory(deps, "the Project's absolute path"), target);
 }
 
 async function runConfigSet(
@@ -244,7 +278,7 @@ function parseProjectPath(
   allowFlags(args, allowed, command);
   const [target, ...extra] = operands;
   rejectExtra(extra);
-  return resolveProjectPath(deps.cwd, target);
+  return projectPathOf(deps, target);
 }
 
 function rejectExtra(extra: string[]): void {

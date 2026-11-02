@@ -124,6 +124,12 @@ export function openRegistry(configPath: string) {
       if (canonical === undefined || !(await stat(canonical)).isDirectory()) {
         throw new RegistryError(`${projectPath} is not a directory`);
       }
+      // A Project's URL mirrors its path, and the root's would have no segments.
+      if (path.parse(canonical).root === canonical) {
+        throw new RegistryError(
+          `${projectPath} is the file system root, which cannot be a Project; add a folder inside it`,
+        );
+      }
       const { config, projects } = await load();
       if (projects.some((project) => project.path === canonical)) {
         if (trackerFolder !== undefined) throw new AlreadyRegisteredError(canonical);
