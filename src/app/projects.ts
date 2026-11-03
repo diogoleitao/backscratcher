@@ -1,19 +1,15 @@
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { resolveConfigPath } from "../config/config.ts";
+import { defaultConfigPath } from "../config/config.ts";
 import { type ProjectModel, readProject } from "../project-reader/project-reader.ts";
 import { watchProject } from "../project-watcher/project-watcher.ts";
 import { openRegistry, type Project } from "../registry/registry.ts";
 
 export type ProjectList = { projects: Project[] } | { error: string };
 
-// The app's entry into the registry, reading the process environment the way
-// the CLI's main does. The CLI sets BACKSCRATCHER_CONFIG to the config file it
-// resolved; under `next dev` the env var or the default applies.
+// The app's entry into the registry, at the config file the CLI's main uses.
 export function appRegistry() {
-  return openRegistry(
-    resolveConfigPath({ home: homedir(), envPath: process.env.BACKSCRATCHER_CONFIG }),
-  );
+  return openRegistry(defaultConfigPath(homedir()));
 }
 
 export function errorMessage(error: unknown): string {

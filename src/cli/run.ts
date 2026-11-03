@@ -1,14 +1,7 @@
 import path from "node:path";
 import { parseArgs } from "node:util";
-import {
-  isSettingKey,
-  openConfig,
-  resolveConfigPath,
-  SETTINGS,
-  type SettingKey,
-  type Settings,
-} from "../config/config.ts";
 import { ConfigError } from "../config/file.ts";
+import { openServerRecord } from "../data/server-record.ts";
 import { DEFAULT_TRACKER_FOLDER } from "../project-reader/project-reader.ts";
 import {
   AlreadyRegisteredError,
@@ -16,20 +9,31 @@ import {
   RegistryError,
   resolveProjectPath,
 } from "../registry/registry.ts";
-import { PortInUseError } from "../server/errors.ts";
-import { resolveServerOptions, type ServerOptions } from "../server/options.ts";
+import {
+  isAnswering,
+  liveServer,
+  serverLog,
+  spawnServer,
+  stopProcessGroup,
+  waitUntilAnswering,
+} from "./background-server.ts";
 
 export type CliDeps = {
-  env: Record<string, string | undefined>;
-  home: string;
+  configPath: string;
+  dataDir: string;
+  url: string;
+  // What runs the server; it must listen on `url`.
+  server: { command: string; args: string[]; cwd: string };
+  // How long `backscratcher start` waits for the server to answer before stopping it.
+  startTimeoutMs: number;
+  platform: NodeJS.Platform;
   // Read only when a command needs it: the shell's folder may have been deleted.
   cwd: () => string;
+  openBrowser: (url: string) => void;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
-  startServer: (options: ServerOptions & { configPath: string }) => Promise<void>;
 };
 
-type Config = ReturnType<typeof openConfig>;
 type Args = ReturnType<typeof parseCliArgs>;
 
 class UsageError extends Error {}
@@ -69,12 +73,6 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       deps.stderr(`backscratcher: ${error.message}\n`);
       return 2;
     }
-    if (error instanceof PortInUseError) {
-      deps.stderr(
-        `backscratcher: ${error.message}. Stop whatever is using it, or start with --port <n> or set one with: backscratcher config port <n>\n`,
-      );
-      return 1;
-    }
     if (
       error instanceof ConfigError ||
       error instanceof RegistryError ||
@@ -88,22 +86,23 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
   }
 }
 
-// One run of a command: the parsed flags, the arguments after the command
-// name, and the config file the flags and environment point at.
+// One run of a command: the parsed flags and the arguments after the command
+// name.
 type Invocation = {
   args: Args;
   operands: string[];
-  config: Config;
   deps: CliDeps;
 };
 
 const COMMANDS: Record<string, (invocation: Invocation) => Promise<number>> = {
+  start: unlessWindows("start", runStart),
+  stop: unlessWindows("stop", runStop),
   add: runAdd,
   remove: runRemove,
   config: runConfig,
 };
 
-// `config <key> ...` for the keys kept per Project rather than as settings.
+// `config <key> ...`: every key is kept per Project, in the Project registry.
 const PROJECT_CONFIG: Record<
   string,
   (invocation: Invocation, values: string[]) => Promise<number>
@@ -113,66 +112,101 @@ const PROJECT_CONFIG: Record<
 
 async function dispatch(argv: string[], deps: CliDeps): Promise<number> {
   const args = parseCliArgs(argv);
-  const configPath = resolveConfigPath({
-    home: deps.home,
-    envPath: deps.env.BACKSCRATCHER_CONFIG,
-    flagPath: args.values.config,
-  });
-  // Absolute, so the server still finds it after leaving a deleted working
-  // directory.
-  const config = openConfig(
-    path.isAbsolute(configPath)
-      ? configPath
-      : path.resolve(workingDirectory(deps, "an absolute config file path"), configPath),
-  );
   const [command, ...operands] = args.positionals;
-  const invocation = { args, operands, config, deps };
-
-  if (command === undefined) return runStart(invocation);
+  if (command === undefined) {
+    deps.stderr(USAGE);
+    return 2;
+  }
   if (!Object.hasOwn(COMMANDS, command)) {
     throw new UsageError(`unknown command "${command}"`);
   }
-  return COMMANDS[command](invocation);
+  return COMMANDS[command]({ args, operands, deps });
 }
 
-async function runStart({ args, config, deps }: Invocation): Promise<number> {
-  allowFlags(args, ["port", "no-open"], "start");
-  const port =
-    args.values.port === undefined ? undefined : parseSetting("port", args.values.port);
-  const options = resolveServerOptions({
-    flags: { port, open: args.values["no-open"] ? false : undefined },
-    settings: await config.settings(),
-  });
-  await deps.startServer({ ...options, configPath: config.path });
+// The background server is stopped through its process group, which Windows
+// does not have.
+function unlessWindows(
+  command: string,
+  run: (invocation: Invocation) => Promise<number>,
+): (invocation: Invocation) => Promise<number> {
+  return async (invocation) => {
+    if (invocation.deps.platform !== "win32") return run(invocation);
+    invocation.deps.stderr(`backscratcher: ${command} is not supported on Windows\n`);
+    return 1;
+  };
+}
+
+const USAGE =
+  "usage: backscratcher start | stop | add [path] | remove [path] | config [tracker ...]\n";
+
+async function runStart({ args, operands, deps }: Invocation): Promise<number> {
+  allowFlags(args, [], "start");
+  rejectExtra(operands);
+  const recordFile = openServerRecord(deps.dataDir);
+  const live = await liveServer(recordFile);
+  if (live !== undefined) {
+    deps.stdout(`backscratcher running at ${live.url}\n`);
+    deps.openBrowser(live.url);
+    return 0;
+  }
+
+  // Otherwise the new server would fail to listen while `url` still answered.
+  if (await isAnswering(deps.url)) {
+    deps.stderr(`backscratcher: ${deps.url} is already in use\n`);
+    return 1;
+  }
+  const server = await spawnServer(deps);
+  const outcome = await waitUntilAnswering(deps, server);
+  if (outcome === "exited") {
+    deps.stderr(
+      `backscratcher: the server exited before it answered; see ${serverLog(deps.dataDir)}\n`,
+    );
+    return 1;
+  }
+  if (outcome === "timed out") {
+    await stopProcessGroup(server.pid!);
+    deps.stderr(
+      `backscratcher: the server did not answer on ${deps.url} within ${deps.startTimeoutMs / 1000} seconds; see ${serverLog(deps.dataDir)}\n`,
+    );
+    return 1;
+  }
+  await recordFile.save({ pid: server.pid!, url: deps.url });
+  deps.stdout(`backscratcher running at ${deps.url}\n`);
+  deps.openBrowser(deps.url);
+  return 0;
+}
+
+async function runStop({ args, operands, deps }: Invocation): Promise<number> {
+  allowFlags(args, [], "stop");
+  rejectExtra(operands);
+  const recordFile = openServerRecord(deps.dataDir);
+  const live = await liveServer(recordFile);
+  const stopped = live !== undefined && (await stopProcessGroup(live.pid));
+  await recordFile.clear();
+  deps.stdout(stopped ? "backscratcher stopped\n" : "backscratcher is not running\n");
   return 0;
 }
 
 async function runConfig(invocation: Invocation): Promise<number> {
-  const { args, operands, config, deps } = invocation;
+  const { args, operands, deps } = invocation;
   allowFlags(args, ["unset"], "config");
   const [key, ...values] = operands;
-  if (key !== undefined && Object.hasOwn(PROJECT_CONFIG, key)) {
-    return PROJECT_CONFIG[key](invocation, values);
-  }
-  const [value, ...extra] = values;
-  rejectExtra(extra);
   if (key === undefined) {
     allowFlags(args, [], "config without a setting");
-    return runConfigPrint(config, deps);
+    return runConfigPrint(deps);
   }
-  return runConfigSet(config, key, value, args.values.unset ?? false);
+  if (!Object.hasOwn(PROJECT_CONFIG, key)) {
+    const known = Object.keys(PROJECT_CONFIG).join(" or ");
+    throw new UsageError(`unknown setting "${key}" (expected ${known})`);
+  }
+  return PROJECT_CONFIG[key](invocation, values);
 }
 
-async function runConfigPrint(config: Config, deps: CliDeps): Promise<number> {
-  const settings = await config.settings();
-  const lines = [`config file: ${config.path}`];
-  for (const key of Object.keys(SETTINGS) as SettingKey[]) {
-    lines.push(`${key}: ${settings[key] ?? `${SETTINGS[key].default} (default)`}`);
-  }
+async function runConfigPrint(deps: CliDeps): Promise<number> {
   // Printed before the Projects are read, so an invalid Project still shows
-  // the settings above the error.
-  deps.stdout(`${lines.join("\n")}\n`);
-  for (const project of await openRegistry(config.path).list()) {
+  // the config file above the error.
+  deps.stdout(`config file: ${deps.configPath}\n`);
+  for (const project of await openRegistry(deps.configPath).list()) {
     const trackerFolder = project.trackerFolder ?? `${DEFAULT_TRACKER_FOLDER} (default)`;
     deps.stdout(`tracker ${project.path}: ${trackerFolder}\n`);
   }
@@ -182,10 +216,10 @@ async function runConfigPrint(config: Config, deps: CliDeps): Promise<number> {
 // `config tracker <dir> [path]` and `config tracker --unset [path]`: the
 // working directory's Project when no path is given.
 async function runConfigTracker(
-  { args, config, deps }: Invocation,
+  { args, deps }: Invocation,
   values: string[],
 ): Promise<number> {
-  const registry = openRegistry(config.path);
+  const registry = openRegistry(deps.configPath);
   if (args.values.unset) {
     const [target, ...extra] = values;
     rejectExtra(extra);
@@ -209,47 +243,11 @@ function projectPathOf(deps: CliDeps, target: string | undefined): string {
   return resolveProjectPath(workingDirectory(deps, "the Project's absolute path"), target);
 }
 
-async function runConfigSet(
-  config: Config,
-  key: string,
-  value: string | undefined,
-  unset: boolean,
-): Promise<number> {
-  if (!isSettingKey(key)) {
-    const known = [...Object.keys(SETTINGS), ...Object.keys(PROJECT_CONFIG)].join(" or ");
-    throw new UsageError(`unknown setting "${key}" (expected ${known})`);
-  }
-  if (unset) {
-    if (value !== undefined) throw new UsageError("--unset takes no value");
-    await config.unset(key);
-  } else {
-    await config.set(key, parseSetting(key, value));
-  }
-  return 0;
-}
-
-function parseSetting<K extends SettingKey>(
-  key: K,
-  text: string | undefined,
-): NonNullable<Settings[K]> {
-  // TypeScript can't correlate SETTINGS[key] with Settings[K] for a generic K.
-  const definition = SETTINGS[key] as {
-    fromText(text: string): NonNullable<Settings[K]> | undefined;
-  };
-  const value = text === undefined ? undefined : definition.fromText(text);
-  if (value === undefined) {
-    throw new UsageError(
-      `invalid ${key} "${text ?? ""}" (expected ${SETTINGS[key].expected})`,
-    );
-  }
-  return value;
-}
-
 async function runAdd(invocation: Invocation): Promise<number> {
   const projectPath = parseProjectPath(invocation, "add", ["tracker"]);
   let result;
   try {
-    result = await openRegistry(invocation.config.path).add(projectPath, {
+    result = await openRegistry(invocation.deps.configPath).add(projectPath, {
       trackerFolder: invocation.args.values.tracker,
     });
   } catch (error) {
@@ -264,7 +262,7 @@ async function runAdd(invocation: Invocation): Promise<number> {
 
 async function runRemove(invocation: Invocation): Promise<number> {
   const projectPath = parseProjectPath(invocation, "remove", []);
-  const removed = await openRegistry(invocation.config.path).remove(projectPath);
+  const removed = await openRegistry(invocation.deps.configPath).remove(projectPath);
   invocation.deps.stdout(`removed: ${removed}\n`);
   return 0;
 }
@@ -288,17 +286,13 @@ function rejectExtra(extra: string[]): void {
 }
 
 const OPTIONS = {
-  config: { type: "string" },
-  port: { type: "string" },
-  "no-open": { type: "boolean" },
   unset: { type: "boolean" },
   tracker: { type: "string" },
 } as const;
 
-// Every flag but --config, which every command takes.
-type Flag = Exclude<keyof typeof OPTIONS, "config">;
+type Flag = keyof typeof OPTIONS;
 
-const FLAGS = Object.keys(OPTIONS).filter((flag): flag is Flag => flag !== "config");
+const FLAGS = Object.keys(OPTIONS) as Flag[];
 
 // Rejects the first flag given that the command does not take.
 function allowFlags(args: Args, allowed: Flag[], context: string): void {
