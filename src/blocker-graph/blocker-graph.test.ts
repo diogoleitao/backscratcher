@@ -1,16 +1,24 @@
 import { describe, expect, it } from "vitest";
-import type { Ticket } from "../project-reader/project-reader.ts";
+import type { NormalisedStatus, Ticket } from "../project-reader/project-reader.ts";
 import { type BlockerGraph, layoutBlockerGraph } from "./blocker-graph.ts";
 
 function ticket(
   number: number,
-  { blockers = [], brokenBlockers = [] }: { blockers?: number[]; brokenBlockers?: string[] } = {},
+  {
+    blockers = [],
+    brokenBlockers = [],
+    normalisedStatus = "none",
+  }: {
+    blockers?: number[];
+    brokenBlockers?: string[];
+    normalisedStatus?: NormalisedStatus;
+  } = {},
 ): Ticket {
   return {
     file: fileOf(number),
     number,
     title: `Ticket ${number}`,
-    normalisedStatus: "none",
+    normalisedStatus,
     blockers: blockers.map(fileOf),
     brokenBlockers,
     source: "",
@@ -57,6 +65,30 @@ describe("layoutBlockerGraph", () => {
     ]);
     expect(graph.columns).toBe(3);
     expect(graph.rows).toBe(2);
+  });
+
+  it("leaves out done Blockers when placing a Ticket, so the first column holds every Ticket that can start", () => {
+    const graph = layoutBlockerGraph([
+      ticket(1, { normalisedStatus: "done" }),
+      ticket(2, { blockers: [1] }),
+      ticket(3, { blockers: [1, 2] }),
+      ticket(4, { normalisedStatus: "wontfix" }),
+      ticket(5, { blockers: [4] }),
+    ]);
+
+    expect(placesOf(graph)).toEqual([
+      { id: "01-ticket.md", column: 0, row: 0 },
+      { id: "02-ticket.md", column: 0, row: 1 },
+      { id: "03-ticket.md", column: 1, row: 0 },
+      { id: "04-ticket.md", column: 0, row: 2 },
+      { id: "05-ticket.md", column: 1, row: 1 },
+    ]);
+    expect(graph.edges).toEqual([
+      { from: "01-ticket.md", to: "02-ticket.md", broken: false },
+      { from: "01-ticket.md", to: "03-ticket.md", broken: false },
+      { from: "02-ticket.md", to: "03-ticket.md", broken: false },
+      { from: "04-ticket.md", to: "05-ticket.md", broken: false },
+    ]);
   });
 
   it("draws a Broken Blocker reference as a placeholder one column left of its Ticket, with a broken edge", () => {

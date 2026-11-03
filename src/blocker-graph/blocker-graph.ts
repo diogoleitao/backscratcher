@@ -20,11 +20,17 @@ export type BlockerGraph = {
 const brokenId = (ticket: Ticket, index: number) => `${ticket.file}#broken-${index}`;
 
 // Lays a Feature's Tickets out left to right: a Ticket sits one column right
-// of its furthest Blocker, so Tickets without Blockers fill the first column.
-// A Broken Blocker reference counts as a Blocker, its placeholder one column
-// left of its Ticket. Within a column, nodes keep Feature order.
+// of its furthest Blocker that is not done, so the first column holds every
+// Ticket that can start, next to the done Tickets. A Broken Blocker reference
+// counts as a Blocker, its placeholder one column left of its Ticket. Within a
+// column, nodes keep Feature order.
 export function layoutBlockerGraph(tickets: Ticket[]): BlockerGraph {
   const byFile = new Map(tickets.map((ticket) => [ticket.file, ticket]));
+  const openBlockers = (ticket: Ticket): Ticket[] =>
+    ticket.blockers.flatMap((file) => {
+      const blocker = byFile.get(file);
+      return blocker && blocker.normalisedStatus !== "done" ? [blocker] : [];
+    });
   const columns = new Map<string, number>();
   const visiting = new Set<string>();
   // A Blocker still being placed closes a cycle, so it does not push the
@@ -34,10 +40,10 @@ export function layoutBlockerGraph(tickets: Ticket[]): BlockerGraph {
     const known = columns.get(ticket.file);
     if (known !== undefined) return known;
     visiting.add(ticket.file);
-    let column = ticket.blockers.length > 0 || ticket.brokenBlockers.length > 0 ? 1 : 0;
-    for (const file of ticket.blockers) {
-      const blocker = byFile.get(file);
-      if (blocker && !visiting.has(file)) column = Math.max(column, columnOf(blocker) + 1);
+    const blockers = openBlockers(ticket);
+    let column = blockers.length > 0 || ticket.brokenBlockers.length > 0 ? 1 : 0;
+    for (const blocker of blockers) {
+      if (!visiting.has(blocker.file)) column = Math.max(column, columnOf(blocker) + 1);
     }
     visiting.delete(ticket.file);
     columns.set(ticket.file, column);

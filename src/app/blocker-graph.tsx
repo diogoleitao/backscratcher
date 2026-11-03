@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import {
   type BlockerGraphNode,
   layoutBlockerGraph,
@@ -15,6 +16,11 @@ const COLUMN_GAP = 60;
 const ROW_GAP = 16;
 // Leaves room for an edge in the gap above the first row.
 const MARGIN = ROW_GAP;
+// Leaves room for an edge between two Tickets in the first column.
+const LEFT_MARGIN = COLUMN_GAP / 2;
+// Leaves room for an edge that turns back from the last column.
+const RIGHT_MARGIN = MARGIN + COLUMN_GAP / 2;
+const TEXT_INSET = 10;
 const LABEL_LENGTH = 24;
 // Arrows and Ticket box outlines.
 const LINE = "#4b5563";
@@ -32,12 +38,14 @@ const FILLS: Record<NormalisedStatus, string> = {
   none: "#ffffff",
 };
 
-const xOf = (column: number) => MARGIN + column * (NODE_WIDTH + COLUMN_GAP);
+const xOf = (column: number) => LEFT_MARGIN + column * (NODE_WIDTH + COLUMN_GAP);
 const yOf = (row: number) => MARGIN + row * (NODE_HEIGHT + ROW_GAP);
 
-// An edge to the next column curves across the gap between them. Any other
-// edge, one that skips a column or points back in a cycle, runs along the gap
-// above the blocked Ticket's row, so it never passes behind a node.
+// An edge to the next column curves across the gap between them. An edge
+// within one column, from a done Blocker, leaves the Blocker's left side and
+// runs down the gap to the left. Any other edge, one that skips a column or
+// points back in a cycle, runs along the gap above the blocked Ticket's row,
+// so it never passes behind a node.
 function edgePath(from: Place, to: Place): string {
   const x1 = xOf(from.column) + NODE_WIDTH;
   const y1 = yOf(from.row) + NODE_HEIGHT / 2;
@@ -47,12 +55,22 @@ function edgePath(from: Place, to: Place): string {
   if (to.column === from.column + 1) {
     return `M${x1},${y1} C${x1 + middle},${y1} ${x2 - middle},${y2} ${x2},${y2}`;
   }
+  if (to.column === from.column) {
+    return `M${x2},${y1} H${x2 - COLUMN_GAP / 4} V${y2} H${x2}`;
+  }
   const lane = yOf(to.row) - ROW_GAP / 2;
   return `M${x1},${y1} H${x1 + middle} V${lane} H${x2 - middle} V${y2} H${x2}`;
 }
 
-const shorten = (text: string) =>
-  text.length > LABEL_LENGTH ? `${text.slice(0, LABEL_LENGTH - 1)}…` : text;
+// Cuts between graphemes, so an emoji or a flag is never split.
+const graphemes = new Intl.Segmenter();
+
+function shorten(text: string): string {
+  const characters = Array.from(graphemes.segment(text), ({ segment }) => segment);
+  return characters.length > LABEL_LENGTH
+    ? `${characters.slice(0, LABEL_LENGTH - 1).join("")}…`
+    : text;
+}
 
 // The Feature's Tickets as boxes coloured by Status, with an arrow from each
 // Blocker to the Ticket it blocks, so the Tickets that can start now stand
@@ -60,7 +78,7 @@ const shorten = (text: string) =>
 export function BlockerGraph({ project, feature }: { project: Project; feature: Feature }) {
   const graph = layoutBlockerGraph(feature.tickets);
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
-  const width = xOf(graph.columns) - COLUMN_GAP + MARGIN;
+  const width = xOf(graph.columns) - COLUMN_GAP + RIGHT_MARGIN;
   const height = yOf(graph.rows) - ROW_GAP + MARGIN;
   return (
     <div style={{ overflowX: "auto" }}>
@@ -68,7 +86,7 @@ export function BlockerGraph({ project, feature }: { project: Project; feature: 
         width={width}
         height={height}
         viewBox={`0 0 ${width} ${height}`}
-        role="img"
+        role="group"
         aria-label="Blocker graph"
         fontFamily="sans-serif"
         fontSize={12}
@@ -92,8 +110,14 @@ export function BlockerGraph({ project, feature }: { project: Project; feature: 
             />
           );
         })}
-        {graph.nodes.map((node) => (
-          <GraphNode key={node.id} project={project} feature={feature} node={node} />
+        {graph.nodes.map((node, index) => (
+          <GraphNode
+            key={node.id}
+            project={project}
+            feature={feature}
+            node={node}
+            clipId={`label-${index}`}
+          />
         ))}
       </svg>
     </div>
@@ -104,10 +128,12 @@ function GraphNode({
   project,
   feature,
   node,
+  clipId,
 }: {
   project: Project;
   feature: Feature;
   node: BlockerGraphNode;
+  clipId: string;
 }) {
   const x = xOf(node.column);
   const y = yOf(node.row);
@@ -116,9 +142,11 @@ function GraphNode({
       <g>
         <title>{`${node.reference}: no Ticket in this Feature matches`}</title>
         <Box x={x} y={y} fill="#ffffff" stroke={BROKEN} dashed />
-        <text x={x + 10} y={y + 27} fill={BROKEN}>
-          {shorten(node.reference)}
-        </text>
+        <BoxText id={clipId} x={x} y={y}>
+          <text x={x + TEXT_INSET} y={y + 27} fill={BROKEN}>
+            {shorten(node.reference)}
+          </text>
+        </BoxText>
       </g>
     );
   }
@@ -128,14 +156,39 @@ function GraphNode({
       <g opacity={ticket.normalisedStatus === "done" ? 0.4 : 1}>
         <title>{`#${ticket.number} ${ticket.title} (${statusText(ticket)})`}</title>
         <Box x={x} y={y} fill={FILLS[ticket.normalisedStatus]} stroke={LINE} />
-        <text x={x + 10} y={y + 18} fill="#111827">
-          #{ticket.number} {shorten(ticket.title)}
-        </text>
-        <text x={x + 10} y={y + 34} fill="#374151" fontSize={11}>
-          {shorten(statusText(ticket))}
-        </text>
+        <BoxText id={clipId} x={x} y={y}>
+          <text x={x + TEXT_INSET} y={y + 18} fill="#111827">
+            #{ticket.number} {shorten(ticket.title)}
+          </text>
+          <text x={x + TEXT_INSET} y={y + 34} fill="#374151" fontSize={11}>
+            {shorten(statusText(ticket))}
+          </text>
+        </BoxText>
       </g>
     </Link>
+  );
+}
+
+// Clips a node's text to the inside of its box, since the character limit
+// cannot tell how wide a label renders.
+function BoxText({
+  id,
+  x,
+  y,
+  children,
+}: {
+  id: string;
+  x: number;
+  y: number;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <clipPath id={id}>
+        <rect x={x + TEXT_INSET} y={y} width={NODE_WIDTH - 2 * TEXT_INSET} height={NODE_HEIGHT} />
+      </clipPath>
+      <g clipPath={`url(#${id})`}>{children}</g>
+    </>
   );
 }
 
