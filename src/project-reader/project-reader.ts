@@ -152,11 +152,11 @@ export async function readProject(
   const skipped: SkippedDirectory[] = [];
   for (const slug of entries.sort((a, b) => a.localeCompare(b))) {
     const directory = path.join(trackerPath, slug);
-    if (!(await ifExists(stat(directory)))?.isDirectory()) continue;
-    // A directory that cannot be read may or may not hold a Spec, so it is
-    // skipped rather than listed as a Feature.
+    // An entry that cannot be inspected, or a directory that cannot be read,
+    // may or may not hold a Spec, so it is skipped rather than listed as a Feature.
     let spec: Stats | undefined;
     try {
+      if (!(await ifExists(stat(directory)))?.isDirectory()) continue;
       spec = await ifExists(stat(path.join(directory, "spec.md")));
     } catch (error) {
       skipped.push({ slug, reason: "unreadable", message: (error as Error).message });

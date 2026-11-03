@@ -155,10 +155,10 @@ export async function readTickets(
     const match = TICKET_FILE.exec(file);
     if (!match) continue;
     const ticketPath = path.join(issuesPath, file);
-    if (!(await ifExists(stat(ticketPath)))?.isFile()) continue;
     const name = { file, number: match[1], slug: match[2] };
     let source: string | undefined;
     try {
+      if (!(await ifExists(stat(ticketPath)))?.isFile()) continue;
       source = await ifExists(readFile(ticketPath, "utf8"));
     } catch (error) {
       tickets.push(unreadableTicket(name, (error as Error).message));

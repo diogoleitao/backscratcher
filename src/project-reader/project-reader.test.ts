@@ -634,8 +634,10 @@ describe("readProject", () => {
       await rm(dir, { recursive: true, force: true });
     });
 
-    async function lock(lockedPath: string) {
-      await chmod(lockedPath, 0o000);
+    // Mode 444 on a folder lets it be listed but not entered, so stat fails on
+    // each entry inside it.
+    async function lock(lockedPath: string, mode = 0o000) {
+      await chmod(lockedPath, mode);
       locked.push(lockedPath);
     }
 
@@ -707,6 +709,49 @@ describe("readProject", () => {
         expect(model.features.map((feature) => feature.slug)).toEqual(["search"]);
         expect(model.skipped).toEqual([
           { slug: "checkout", reason: "unreadable", message: expect.stringContaining("EACCES") },
+        ]);
+      },
+    );
+
+    it.skipIf(!modesBlockReads)(
+      "lists a Ticket in an issues/ folder that can be listed but not entered, with a warning naming the problem",
+      async () => {
+        const checkoutPath = await projectWithCheckout();
+        await lock(path.join(checkoutPath, "issues"), 0o444);
+
+        const model = await readProject(dir, { prLookup: noPrs });
+
+        expect(model.features).toMatchObject([
+          {
+            slug: "checkout",
+            tickets: [
+              {
+                file: "01-cart-total.md",
+                number: 1,
+                title: "cart-total",
+                source: "",
+                warnings: [{ kind: "unreadable", message: expect.stringContaining("EACCES") }],
+              },
+            ],
+            warnings: [],
+          },
+          { slug: "search", spec: { source: "# Search\n" }, tickets: [], warnings: [] },
+        ]);
+      },
+    );
+
+    it.skipIf(!modesBlockReads)(
+      "skips each directory in a Tracker folder that can be listed but not entered, with a reason naming the problem",
+      async () => {
+        await projectWithCheckout();
+        await lock(path.join(dir, ".scratch"), 0o444);
+
+        const model = await readProject(dir, { prLookup: noPrs });
+
+        expect(model.features).toEqual([]);
+        expect(model.skipped).toEqual([
+          { slug: "checkout", reason: "unreadable", message: expect.stringContaining("EACCES") },
+          { slug: "search", reason: "unreadable", message: expect.stringContaining("EACCES") },
         ]);
       },
     );
