@@ -283,6 +283,28 @@ describe("backscratcher start", () => {
     expect(isAlive(Number(await readFile(pidFile, "utf8")))).toBe(false);
   });
 
+  it("gives up in time on a server that accepts connections but never responds", async () => {
+    const pidFile = path.join(dir, "hung.pid");
+    const hung = `
+      require("node:fs").writeFileSync(process.argv[2], String(process.pid));
+      require("node:http").createServer(() => {}).listen(Number(process.argv[1]), "127.0.0.1");
+    `;
+
+    const result = await cli(["start"], {
+      serverArgs: ["-e", hung, String(port), pidFile],
+      startTimeoutMs: 500,
+    });
+
+    expect(result).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: `backscratcher: the server did not answer on ${url} within 0.5 seconds; see ${path.join(dataDir(), "server.log")}\n`,
+      opened: [],
+    });
+    expect(await serverRecord()).toBeUndefined();
+    expect(isAlive(Number(await readFile(pidFile, "utf8")))).toBe(false);
+  });
+
   it("fails, recording nothing, when the server exits before it answers", async () => {
     const result = await cli(["start"], { serverArgs: ["-e", "process.exit(1)"] });
 

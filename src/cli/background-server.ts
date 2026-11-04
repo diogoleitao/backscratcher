@@ -5,6 +5,7 @@ import type { openServerRecord, ServerRecord } from "../data/server-record.ts";
 import type { CliDeps } from "./run.ts";
 
 const STOP_TIMEOUT_MS = 10_000;
+const PROBE_TIMEOUT_MS = 1_000;
 
 type ServerRecordFile = ReturnType<typeof openServerRecord>;
 
@@ -108,9 +109,11 @@ export async function waitUntilAnswering(
   }
 }
 
+// A listener that accepts the connection but never sends headers would
+// otherwise hold each probe for undici's 300-second headers timeout.
 export async function isAnswering(url: string): Promise<boolean> {
   try {
-    await fetch(url);
+    await fetch(url, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
     return true;
   } catch {
     return false;
