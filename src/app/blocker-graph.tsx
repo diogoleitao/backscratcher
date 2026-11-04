@@ -16,12 +16,15 @@ const COLUMN_GAP = 60;
 const ROW_GAP = 16;
 // Leaves room for an edge in the gap above the first row.
 const MARGIN = ROW_GAP;
-// Leaves room for an edge between two Tickets in the first column.
-const LEFT_MARGIN = COLUMN_GAP / 2;
+// Leaves room for an edge into the first column, from a Ticket in the same
+// column or turning back from a later one.
+const LEFT_MARGIN = COLUMN_GAP;
 // Leaves room for an edge that turns back from the last column.
 const RIGHT_MARGIN = MARGIN + COLUMN_GAP / 2;
 const TEXT_INSET = 10;
-const LABEL_LENGTH = 24;
+// Counts the whole line, Ticket number included, so most labels end in … before
+// the clip.
+const LABEL_LENGTH = 20;
 // Arrows and Ticket box outlines.
 const LINE = "#4b5563";
 const BROKEN = "#dc2626";
@@ -158,7 +161,7 @@ function GraphNode({
         <Box x={x} y={y} fill={FILLS[ticket.normalisedStatus]} stroke={LINE} />
         <BoxText id={clipId} x={x} y={y}>
           <text x={x + TEXT_INSET} y={y + 18} fill="#111827">
-            #{ticket.number} {shorten(ticket.title)}
+            {shorten(`#${ticket.number} ${ticket.title}`)}
           </text>
           <text x={x + TEXT_INSET} y={y + 34} fill="#374151" fontSize={11}>
             {shorten(statusText(ticket))}
