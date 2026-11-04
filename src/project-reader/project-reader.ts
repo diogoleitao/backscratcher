@@ -1,7 +1,8 @@
+import type { Stats } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { ifExists } from "../fs.ts";
-import { TRIAGE_LABELS_FILE, triageLabels } from "./status.ts";
+import { TRIAGE_LABELS_FILE, type TriageLabels, triageLabels } from "./status.ts";
 import { readTickets, type Ticket } from "./ticket.ts";
 
 export type PullRequestRef = { repo: string; number: number };
@@ -17,7 +18,22 @@ export type PrLookup = (refs: PullRequestRef[]) => Promise<PullRequest[]>;
 export type { NormalisedStatus } from "./status.ts";
 export type { Ticket, TicketWarning } from "./ticket.ts";
 
-export type Feature = { slug: string; spec: { source: string }; tickets: Ticket[] };
+export type FeatureWarning =
+  | { kind: "spec-unreadable"; message: string }
+  | { kind: "issues-unreadable"; message: string };
+
+// The Spec's source is undefined when spec.md exists but cannot be read.
+export type Feature = {
+  slug: string;
+  spec: { source: string | undefined };
+  tickets: Ticket[];
+  warnings: FeatureWarning[];
+};
+
+// A directory in the Tracker folder that is not listed as a Feature, and why.
+export type SkippedDirectory =
+  | { slug: string; reason: "no-spec" }
+  | { slug: string; reason: "unreadable"; message: string };
 
 export type ProjectLevelPageKind = "glossary" | "adr" | "tracker" | "out-of-scope";
 
@@ -30,9 +46,12 @@ export type ProjectLevelPage = {
 };
 
 export type ProjectModel = {
-  trackerFolder: { path: string; exists: boolean };
+  // unreadable holds why a Tracker folder that exists could not be listed.
+  trackerFolder:
+    | { path: string; exists: false }
+    | { path: string; exists: true; unreadable?: string };
   features: Feature[];
-  skipped: string[];
+  skipped: SkippedDirectory[];
   pages: ProjectLevelPage[];
 };
 
@@ -94,7 +113,14 @@ async function readPages(projectPath: string, trackerPath: string): Promise<Proj
   const pages: ProjectLevelPage[] = [];
   const sources = pageSourceEntries(projectPath, trackerPath);
   for (const [kind, { folder, accepts }] of sources) {
-    const names = (await ifExists(readdir(path.join(projectPath, folder)))) ?? [];
+    let names: string[];
+    try {
+      names = (await ifExists(readdir(path.join(projectPath, folder)))) ?? [];
+    } catch (error) {
+      // readProject reports a Tracker folder it cannot read on the Project.
+      if (kind !== "tracker") throw error;
+      names = [];
+    }
     for (const name of names.filter(accepts).sort((a, b) => a.localeCompare(b))) {
       const pagePath = path.posix.join(folder, name);
       if (pages.some((page) => page.path === pagePath)) continue;
@@ -111,22 +137,48 @@ export async function readProject(
 ): Promise<ProjectModel> {
   const trackerPath = resolveTrackerPath(projectPath, options.trackerFolder);
   const pages = await readPages(projectPath, trackerPath);
-  const entries = await ifExists(readdir(trackerPath));
+  let entries: string[] | undefined;
+  try {
+    entries = await ifExists(readdir(trackerPath));
+  } catch (error) {
+    const trackerFolder = { path: trackerPath, exists: true, unreadable: (error as Error).message };
+    return { trackerFolder, features: [], skipped: [], pages };
+  }
   if (entries === undefined) {
     return { trackerFolder: { path: trackerPath, exists: false }, features: [], skipped: [], pages };
   }
   const labels = triageLabels(await readFileIfPresent(path.join(projectPath, TRIAGE_LABELS_FILE)));
   const features: Feature[] = [];
-  const skipped: string[] = [];
+  const skipped: SkippedDirectory[] = [];
   for (const slug of entries.sort((a, b) => a.localeCompare(b))) {
     const directory = path.join(trackerPath, slug);
-    if (!(await ifExists(stat(directory)))?.isDirectory()) continue;
-    const spec = await readFileIfPresent(path.join(directory, "spec.md"));
-    if (spec !== undefined) {
-      features.push({ slug, spec: { source: spec }, tickets: await readTickets(directory, labels) });
-    } else {
-      skipped.push(slug);
+    // An entry that cannot be inspected, or a directory that cannot be read,
+    // may or may not hold a Spec, so it is skipped rather than listed as a Feature.
+    let spec: Stats | undefined;
+    try {
+      if (!(await ifExists(stat(directory)))?.isDirectory()) continue;
+      spec = await ifExists(stat(path.join(directory, "spec.md")));
+    } catch (error) {
+      skipped.push({ slug, reason: "unreadable", message: (error as Error).message });
+      continue;
     }
+    if (spec?.isFile()) features.push(await readFeature(slug, directory, labels));
+    else skipped.push({ slug, reason: "no-spec" });
   }
   return { trackerFolder: { path: trackerPath, exists: true }, features, skipped, pages };
+}
+
+// A Spec or issues/ folder that cannot be read is named on the Feature, so the
+// rest of the Feature and of the Project is still read.
+async function readFeature(slug: string, directory: string, labels: TriageLabels): Promise<Feature> {
+  const warnings: FeatureWarning[] = [];
+  let source: string | undefined;
+  try {
+    source = await readFile(path.join(directory, "spec.md"), "utf8");
+  } catch (error) {
+    warnings.push({ kind: "spec-unreadable", message: (error as Error).message });
+  }
+  const { tickets, unreadable } = await readTickets(directory, labels);
+  if (unreadable !== undefined) warnings.push({ kind: "issues-unreadable", message: unreadable });
+  return { slug, spec: { source }, tickets, warnings };
 }

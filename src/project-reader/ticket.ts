@@ -137,18 +137,28 @@ function unreadableTicket({ file, number, slug }: TicketName, message: string): 
   };
 }
 
-// Tickets are the NN-<slug>.md files in a Feature's issues/ folder.
-export async function readTickets(featurePath: string, labels: TriageLabels): Promise<Ticket[]> {
+// Tickets are the NN-<slug>.md files in a Feature's issues/ folder. An issues/
+// folder that cannot be listed gives no Tickets and the reason as unreadable.
+export async function readTickets(
+  featurePath: string,
+  labels: TriageLabels,
+): Promise<{ tickets: Ticket[]; unreadable?: string }> {
   const issuesPath = path.join(featurePath, "issues");
+  let files: string[];
+  try {
+    files = (await ifExists(readdir(issuesPath))) ?? [];
+  } catch (error) {
+    return { tickets: [], unreadable: (error as Error).message };
+  }
   const tickets: ParsedTicket[] = [];
-  for (const file of (await ifExists(readdir(issuesPath))) ?? []) {
+  for (const file of files) {
     const match = TICKET_FILE.exec(file);
     if (!match) continue;
     const ticketPath = path.join(issuesPath, file);
-    if (!(await ifExists(stat(ticketPath)))?.isFile()) continue;
     const name = { file, number: match[1], slug: match[2] };
     let source: string | undefined;
     try {
+      if (!(await ifExists(stat(ticketPath)))?.isFile()) continue;
       source = await ifExists(readFile(ticketPath, "utf8"));
     } catch (error) {
       tickets.push(unreadableTicket(name, (error as Error).message));
@@ -157,5 +167,5 @@ export async function readTickets(featurePath: string, labels: TriageLabels): Pr
     if (source !== undefined) tickets.push(parseTicket(name, source, labels));
   }
   tickets.sort((a, b) => a.number - b.number || a.file.localeCompare(b.file));
-  return tickets.map((ticket) => resolveBlockers(ticket, tickets));
+  return { tickets: tickets.map((ticket) => resolveBlockers(ticket, tickets)) };
 }

@@ -3,9 +3,11 @@ import type {
   ProjectLevelPage,
   ProjectLevelPageKind,
   ProjectModel,
+  SkippedDirectory,
 } from "../project-reader/project-reader.ts";
 import type { Project } from "../registry/registry.ts";
 import { featureHref, pageHref } from "./project-urls.ts";
+import { WarningBadges } from "./warning-badges.tsx";
 
 // One heading per kind, in display order.
 const pageHeadings: Record<ProjectLevelPageKind, string> = {
@@ -33,6 +35,14 @@ function Features({ project, model }: { project: Project; model: ProjectModel })
       </p>
     );
   }
+  if (model.trackerFolder.unreadable !== undefined) {
+    return (
+      <p>
+        Could not read the Tracker folder at <code>{model.trackerFolder.path}</code>:{" "}
+        {model.trackerFolder.unreadable}
+      </p>
+    );
+  }
   return (
     <>
       <h3>Features</h3>
@@ -44,14 +54,21 @@ function Features({ project, model }: { project: Project; model: ProjectModel })
         <ul>
           {model.features.map((feature) => (
             <li key={feature.slug}>
-              <Link href={featureHref(project, feature.slug)}>{feature.slug}</Link>
+              <Link href={featureHref(project, feature.slug)}>{feature.slug}</Link>{" "}
+              <WarningBadges warnings={feature.warnings} />
             </li>
           ))}
         </ul>
       )}
-      {model.skipped.length > 0 && <p>Skipped, no spec.md: {model.skipped.join(", ")}</p>}
+      {model.skipped.length > 0 && (
+        <p>Skipped: {model.skipped.map((entry) => `${entry.slug} (${skipReason(entry)})`).join(", ")}</p>
+      )}
     </>
   );
+}
+
+function skipReason(entry: SkippedDirectory): string {
+  return entry.reason === "no-spec" ? "no spec.md" : `could not read it: ${entry.message}`;
 }
 
 function ProjectLevelPages({ project, pages }: { project: Project; pages: ProjectLevelPage[] }) {
