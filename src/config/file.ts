@@ -1,18 +1,6 @@
-import { randomUUID } from "node:crypto";
-import {
-  chmod,
-  lstat,
-  mkdir,
-  readFile,
-  readlink,
-  realpath,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { lstat, readFile, readlink, realpath, stat } from "node:fs/promises";
 import path from "node:path";
-import { ifExists } from "../fs.ts";
+import { ifExists, writeFileAtomically } from "../fs.ts";
 
 export class ConfigError extends Error {}
 
@@ -20,8 +8,9 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// The app's own config file, shared by the settings and the Project registry.
-// Each section's owner validates its section after loading.
+// The app's own config file, holding the Project registry. Each section's
+// owner validates its section after loading, and sections nobody owns are
+// kept as they are.
 export type ConfigFile = Record<string, unknown>;
 
 // Linux's limit on links followed in one path before ELOOP; macOS stops at 32.
@@ -73,29 +62,14 @@ export function openConfigFile(configPath: string) {
       return config;
     },
 
-    // Writes a temp file beside the config file, then renames it over, so a
-    // reader never sees a half-written file. A symlinked config file is
-    // written at its target, keeping the link. Each save has its own temp
-    // file, so saves at once in one process (the server) do not collide. Two
-    // writers at once can still lose one write: the last rename wins.
+    // Written atomically, keeping the file's mode. A symlinked config file is
+    // written at its target, keeping the link. Saves at once in one process
+    // (the server) do not collide, but two writers at once can still lose one
+    // write: the last rename wins.
     async save(config: ConfigFile): Promise<void> {
       const target = await writeTarget(configPath);
-      await mkdir(path.dirname(target), { recursive: true });
-      const temp = `${target}.${randomUUID()}.tmp`;
-      // The rename replaces the file, so the temp file takes on its mode. It is
-      // created with it, so a 0600 config is never readable by others; the
-      // chmod restores what the umask took off.
       const mode = (await ifExists(stat(target)))?.mode;
-      try {
-        await writeFile(temp, `${JSON.stringify(config, null, 2)}\n`, {
-          mode: mode === undefined ? undefined : mode & 0o777,
-        });
-        if (mode !== undefined) await chmod(temp, mode & 0o7777);
-        await rename(temp, target);
-      } catch (error) {
-        await rm(temp, { force: true });
-        throw error;
-      }
+      await writeFileAtomically(target, `${JSON.stringify(config, null, 2)}\n`, mode);
     },
 
     error(message: string): ConfigError {

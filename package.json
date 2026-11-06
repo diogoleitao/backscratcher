@@ -17,9 +17,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "next dev --hostname 127.0.0.1 --port 4747",
+    "dev": "next dev --hostname 127.0.0.1 --port 1795",
     "build": "next build && tsc -p tsconfig.cli.json",
-    "start": "node dist/cli/main.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.cli.json --noEmit",
     "test": "vitest run",
     "prepack": "npm run build"

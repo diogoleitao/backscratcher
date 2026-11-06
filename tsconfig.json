@@ -34,7 +34,6 @@
   "exclude": [
     "node_modules",
     "dist",
-    "src/cli/main.ts",
-    "src/server/start.ts"
+    "src/cli/main.ts"
   ]
 }

@@ -1,17 +1,20 @@
 import {
   access,
+  chmod,
+  lstat,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   realpath,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { openConfig } from "../config/config.ts";
 import { ConfigError } from "../config/file.ts";
 import {
   AlreadyRegisteredError,
@@ -36,6 +39,11 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
+
+async function writeConfigFile(contents: string) {
+  await mkdir(path.dirname(configPath), { recursive: true });
+  await writeFile(configPath, contents);
+}
 
 describe("resolveProjectPath", () => {
   it("resolves a path relative to the working directory", () => {
@@ -144,8 +152,7 @@ describe("openRegistry", () => {
 
   it("rejects a config file that lists a Project twice, without rewriting it", async () => {
     const contents = JSON.stringify({ projects: [{ path: projectDir }, { path: projectDir }] });
-    await mkdir(path.dirname(configPath), { recursive: true });
-    await writeFile(configPath, contents);
+    await writeConfigFile(contents);
 
     await expect(openRegistry(configPath).list()).rejects.toThrow(
       new ConfigError(`config file ${configPath}: projects lists ${projectDir} more than once`),
@@ -158,8 +165,7 @@ describe("openRegistry", () => {
     "rejects projects that are %s, without rewriting the file",
     async (projects) => {
       const contents = `{"projects":${projects}}`;
-      await mkdir(path.dirname(configPath), { recursive: true });
-      await writeFile(configPath, contents);
+      await writeConfigFile(contents);
       const registry = openRegistry(configPath);
 
       await expect(registry.list()).rejects.toThrow(
@@ -172,11 +178,106 @@ describe("openRegistry", () => {
     },
   );
 
-  it("keeps the settings in the config file when adding a Project", async () => {
-    await openConfig(configPath).set("port", 5050);
+  it("keeps the config file's other sections when adding a Project", async () => {
+    await writeConfigFile(JSON.stringify({ settings: { port: 5050 } }));
     await openRegistry(configPath).add(projectDir);
 
-    expect(await openConfig(configPath).settings()).toEqual({ port: 5050 });
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({
+      settings: { port: 5050 },
+      projects: [{ path: projectDir }],
+    });
+  });
+
+  describe("config file", () => {
+    // The file add(projectDir) writes; projectDir is set per test.
+    const written = () => ({ projects: [{ path: projectDir }] });
+
+    it("writes through a symlinked config file, keeping the link", async () => {
+      const target = path.join(dir, "dotfiles", "config.json");
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, "{}");
+      await mkdir(path.dirname(configPath), { recursive: true });
+      await symlink(target, configPath);
+
+      await openRegistry(configPath).add(projectDir);
+
+      expect((await lstat(configPath)).isSymbolicLink()).toBe(true);
+      expect(JSON.parse(await readFile(target, "utf8"))).toEqual(written());
+      expect(await readdir(path.dirname(target))).toEqual(["config.json"]);
+    });
+
+    it("writes through a symlink whose target is missing, creating the target and keeping the link", async () => {
+      const target = path.join(dir, "dotfiles", "backscratcher", "config.json");
+      await mkdir(path.dirname(configPath), { recursive: true });
+      await symlink(target, configPath);
+
+      await openRegistry(configPath).add(projectDir);
+
+      expect((await lstat(configPath)).isSymbolicLink()).toBe(true);
+      expect(JSON.parse(await readFile(target, "utf8"))).toEqual(written());
+    });
+
+    it("writes through a relative symlink inside a symlinked folder, resolving it from the real folder", async () => {
+      const realFolder = path.join(dir, "dotfiles", "backscratcher");
+      await mkdir(realFolder, { recursive: true });
+      await symlink(realFolder, path.dirname(configPath));
+      await symlink(path.join("..", "shared", "bs.json"), path.join(realFolder, "config.json"));
+
+      await openRegistry(configPath).add(projectDir);
+
+      expect((await lstat(path.join(realFolder, "config.json"))).isSymbolicLink()).toBe(true);
+      expect(
+        JSON.parse(await readFile(path.join(dir, "dotfiles", "shared", "bs.json"), "utf8")),
+      ).toEqual(written());
+    });
+
+    it("rejects a config file that is a symlink loop, keeping the links", async () => {
+      const other = path.join(dir, "other.json");
+      await mkdir(path.dirname(configPath), { recursive: true });
+      await symlink(other, configPath);
+      await symlink(configPath, other);
+
+      const message = `config file ${configPath} is a symlink loop or too long a chain of links`;
+      await expect(openRegistry(configPath).list()).rejects.toThrow(new ConfigError(message));
+      await expect(openRegistry(configPath).add(projectDir)).rejects.toThrow(
+        new ConfigError(message),
+      );
+      expect((await lstat(configPath)).isSymbolicLink()).toBe(true);
+      expect((await lstat(other)).isSymbolicLink()).toBe(true);
+    });
+
+    it("keeps the config file's mode when writing it", async () => {
+      await writeConfigFile("{}");
+      await chmod(configPath, 0o600);
+
+      await openRegistry(configPath).add(projectDir);
+
+      expect((await stat(configPath)).mode & 0o777).toBe(0o600);
+    });
+
+    it("survives two saves at once in one process, leaving no temp file", async () => {
+      const other = path.join(dir, "projects", "other");
+      await mkdir(other);
+
+      await Promise.all([
+        openRegistry(configPath).add(projectDir),
+        openRegistry(configPath).add(other),
+      ]);
+
+      // The last rename wins, so only one of the two writes is kept.
+      expect([[[{ path: projectDir }]], [[{ path: other }]]]).toContainEqual([
+        await openRegistry(configPath).list(),
+      ]);
+      expect(await readdir(path.dirname(configPath))).toEqual(["config.json"]);
+    });
+
+    it("rejects a file that is not valid JSON, naming the file", async () => {
+      await writeConfigFile("{ not json");
+
+      await expect(openRegistry(configPath).list()).rejects.toThrow(
+        new ConfigError(`config file ${configPath} is not valid JSON`),
+      );
+    });
   });
 
   it("removes a Project, leaving the others", async () => {
@@ -304,8 +405,7 @@ describe("openRegistry", () => {
       "rejects a stored override of %s, without rewriting the file",
       async (trackerFolder) => {
         const contents = `{"projects":[{"path":${JSON.stringify(projectDir)},"trackerFolder":${trackerFolder}}]}`;
-        await mkdir(path.dirname(configPath), { recursive: true });
-        await writeFile(configPath, contents);
+        await writeConfigFile(contents);
 
         await expect(openRegistry(configPath).list()).rejects.toThrow(
           new ConfigError(
