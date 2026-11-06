@@ -1,9 +1,9 @@
 import path from "node:path";
-import Link from "next/link";
 import type { ProjectLevelPage } from "../project-reader/project-reader.ts";
 import type { Project } from "../registry/registry.ts";
 import { MarkdownArticle } from "./markdown.tsx";
 import { pageHref, projectHref } from "./project-urls.ts";
+import { PageHeader } from "./ui.tsx";
 
 export function ProjectLevelPageView({
   project,
@@ -34,10 +34,10 @@ export function ProjectLevelPageView({
   };
   return (
     <>
-      <p>
-        <Link href={projectHref(project)}>Project overview</Link>
-      </p>
-      <h3>{page.path}</h3>
+      <PageHeader
+        back={{ href: projectHref(project), label: "Project overview" }}
+        title={<span className="font-mono">{page.path}</span>}
+      />
       <MarkdownArticle source={page.source} resolveRelative={linkToPage} />
     </>
   );

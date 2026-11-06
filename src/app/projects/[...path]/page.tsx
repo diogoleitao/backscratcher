@@ -14,6 +14,7 @@ import {
   versionOf,
 } from "../../projects.ts";
 import { TicketPage } from "../../ticket-page.tsx";
+import { Alert } from "../../ui.tsx";
 
 export default async function ProjectPage({
   params,
@@ -29,7 +30,7 @@ export default async function ProjectPage({
   const { path: rawSegments } = await params;
   const { feature, ticket, page } = await searchParams;
   const projectList = await listProjects();
-  if ("error" in projectList) return <p role="alert">{projectList.error}</p>;
+  if ("error" in projectList) return <Alert>{projectList.error}</Alert>;
 
   const segments = decodeSegments(rawSegments);
   const project = findProject(projectList.projects, segments);
@@ -40,16 +41,18 @@ export default async function ProjectPage({
     <>
       <ProjectSwitcher projects={projectList.projects} current={project} />
       {project && read ? (
-        <section>
+        <section className="space-y-6">
           {/* The stream reads the Project once, so a new Tracker folder needs a new one. */}
           <LiveUpdates
             key={project.trackerFolder}
             href={eventsHref(project)}
             version={versionOf(read)}
           />
-          <h2>{path.basename(project.path)}</h2>
-          <p>{project.path}</p>
-          <TrackerFolderForm key={project.trackerFolder} project={project} />
+          <div className="space-y-3 border-b border-border pb-4">
+            <h2 className="text-2xl font-semibold">{path.basename(project.path)}</h2>
+            <p className="font-mono text-sm text-fg-muted">{project.path}</p>
+            <TrackerFolderForm key={project.trackerFolder} project={project} />
+          </div>
           <ProjectContent
             project={project}
             read={read}
@@ -59,7 +62,7 @@ export default async function ProjectPage({
           />
         </section>
       ) : (
-        <p role="alert">/{segments.join("/")} is not a registered Project.</p>
+        <Alert>/{segments.join("/")} is not a registered Project.</Alert>
       )}
     </>
   );
@@ -94,17 +97,17 @@ function ProjectContent({
     ]
       .filter(Boolean)
       .join(" and ");
-    return <p role="alert">This URL names {named}. Open one at a time.</p>;
+    return <Alert>This URL names {named}. Open one at a time.</Alert>;
   }
   const [slug] = slugs;
   const [file] = files;
   const [pagePath] = pagePaths;
-  if ("error" in read) return <p role="alert">{read.error}</p>;
+  if ("error" in read) return <Alert>{read.error}</Alert>;
   if (pagePath) {
     // Only paths the reader listed resolve, so the URL cannot reach other files.
     const found = read.model.pages.find((candidate) => candidate.path === pagePath);
     if (found === undefined) {
-      return <p role="alert">{pagePath} is not a Project-level page in this Project.</p>;
+      return <Alert>{pagePath} is not a Project-level page in this Project.</Alert>;
     }
     return <ProjectLevelPageView project={project} page={found} pages={read.model.pages} />;
   }
@@ -112,13 +115,13 @@ function ProjectContent({
 
   const found = read.model.features.find((candidate) => candidate.slug === slug);
   if (found === undefined) {
-    return <p role="alert">{slug} is not a Feature in this Project.</p>;
+    return <Alert>{slug} is not a Feature in this Project.</Alert>;
   }
   if (!file) return <FeaturePage project={project} feature={found} />;
 
   const foundTicket = found.tickets.find((candidate) => candidate.file === file);
   if (foundTicket === undefined) {
-    return <p role="alert">{file} is not a Ticket in {slug}.</p>;
+    return <Alert>{file} is not a Ticket in {slug}.</Alert>;
   }
   return <TicketPage project={project} feature={found} ticket={foundTicket} />;
 }

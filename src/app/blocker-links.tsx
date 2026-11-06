@@ -26,7 +26,7 @@ export function BlockerLinks({
       </Link>
     )),
     ...ticket.brokenBlockers.map((reference, index) => (
-      <s key={`broken-${index}`} title="No Ticket in this Feature matches">
+      <s key={`broken-${index}`} title="No Ticket in this Feature matches" className="text-danger">
         {reference}
       </s>
     )),

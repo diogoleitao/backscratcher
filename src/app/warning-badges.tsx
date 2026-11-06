@@ -1,5 +1,7 @@
 import { Fragment } from "react";
 import type { FeatureWarning, TicketWarning } from "../project-reader/project-reader.ts";
+import { TONES } from "./tones.ts";
+import { Pill } from "./ui.tsx";
 
 type Warning = FeatureWarning | TicketWarning;
 
@@ -28,7 +30,9 @@ export function WarningBadges({ warnings }: { warnings: Warning[] }) {
   return warnings.map((warning, index) => (
     <Fragment key={index}>
       {index > 0 && " "}
-      <mark>⚠ {describe(warning)}</mark>
+      <Pill className={TONES.attention.pill}>
+        ⚠ {describe(warning)}
+      </Pill>
     </Fragment>
   ));
 }

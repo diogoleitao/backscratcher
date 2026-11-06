@@ -7,6 +7,7 @@ import type {
 } from "../project-reader/project-reader.ts";
 import type { Project } from "../registry/registry.ts";
 import { featureHref, pageHref } from "./project-urls.ts";
+import { Card } from "./ui.tsx";
 import { WarningBadges } from "./warning-badges.tsx";
 
 // One heading per kind, in display order.
@@ -16,6 +17,9 @@ const pageHeadings: Record<ProjectLevelPageKind, string> = {
   tracker: "Tracker folder",
   "out-of-scope": "Out of scope",
 };
+
+const LIST = "divide-y divide-border-muted";
+const ITEM = "px-4 py-2";
 
 export function ProjectOverview({ project, model }: { project: Project; model: ProjectModel }) {
   return (
@@ -29,7 +33,7 @@ export function ProjectOverview({ project, model }: { project: Project; model: P
 function Features({ project, model }: { project: Project; model: ProjectModel }) {
   if (!model.trackerFolder.exists) {
     return (
-      <p>
+      <p className="text-fg-muted">
         No Tracker folder at <code>{model.trackerFolder.path}</code>. Features appear here once it
         exists.
       </p>
@@ -37,33 +41,36 @@ function Features({ project, model }: { project: Project; model: ProjectModel })
   }
   if (model.trackerFolder.unreadable !== undefined) {
     return (
-      <p>
+      <p className="text-fg-muted">
         Could not read the Tracker folder at <code>{model.trackerFolder.path}</code>:{" "}
         {model.trackerFolder.unreadable}
       </p>
     );
   }
   return (
-    <>
-      <h3>Features</h3>
+    <Card title={<h3>Features</h3>}>
       {model.features.length === 0 ? (
-        <p>
+        <p className={`${ITEM} text-fg-muted`}>
           No Features in <code>{model.trackerFolder.path}</code>.
         </p>
       ) : (
-        <ul>
+        <ul className={LIST}>
           {model.features.map((feature) => (
-            <li key={feature.slug}>
-              <Link href={featureHref(project, feature.slug)}>{feature.slug}</Link>{" "}
+            <li key={feature.slug} className={ITEM}>
+              <Link href={featureHref(project, feature.slug)} className="font-medium">
+                {feature.slug}
+              </Link>{" "}
               <WarningBadges warnings={feature.warnings} />
             </li>
           ))}
         </ul>
       )}
       {model.skipped.length > 0 && (
-        <p>Skipped: {model.skipped.map((entry) => `${entry.slug} (${skipReason(entry)})`).join(", ")}</p>
+        <p className={`${ITEM} border-t border-border-muted text-sm text-fg-muted`}>
+          Skipped: {model.skipped.map((entry) => `${entry.slug} (${skipReason(entry)})`).join(", ")}
+        </p>
       )}
-    </>
+    </Card>
   );
 }
 
@@ -75,17 +82,18 @@ function ProjectLevelPages({ project, pages }: { project: Project; pages: Projec
   if (pages.length === 0) return null;
   const groups = Object.entries(pageHeadings) as [ProjectLevelPageKind, string][];
   return (
-    <>
-      <h3>Project-level pages</h3>
+    <Card title={<h3>Project-level pages</h3>}>
       {groups.map(([kind, heading]) => {
         const group = pages.filter((page) => page.kind === kind);
         if (group.length === 0) return null;
         return (
-          <section key={kind}>
-            <h4>{heading}</h4>
-            <ul>
+          <section key={kind} className="border-b border-border-muted last:border-b-0">
+            <h4 className="px-4 pt-3 text-xs font-semibold tracking-wide text-fg-muted uppercase">
+              {heading}
+            </h4>
+            <ul className={LIST}>
               {group.map((page) => (
-                <li key={page.path}>
+                <li key={page.path} className={ITEM}>
                   <Link href={pageHref(project, page.path)}>{page.path}</Link>
                 </li>
               ))}
@@ -93,6 +101,6 @@ function ProjectLevelPages({ project, pages }: { project: Project; pages: Projec
           </section>
         );
       })}
-    </>
+    </Card>
   );
 }

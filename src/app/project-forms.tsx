@@ -2,44 +2,51 @@ import { DEFAULT_TRACKER_FOLDER } from "../project-reader/project-reader.ts";
 import type { Project } from "../registry/registry.ts";
 import { ActionForm, Field } from "./action-form.tsx";
 import { addProject, removeProject, setTrackerFolder } from "./actions.ts";
+import { Button } from "./ui.tsx";
+
+// A form's controls side by side, wrapping on a narrow window.
+const INLINE_FIELDS = "flex flex-wrap items-center gap-2";
+const LABEL = `${INLINE_FIELDS} text-sm font-medium`;
 
 export function AddProjectForm() {
   return (
-    <ActionForm action={addProject} label="Add a Project">
-      <label>
+    <ActionForm action={addProject} label="Add a Project" className={INLINE_FIELDS}>
+      <label className={LABEL}>
         Add a Project <Field name="path" placeholder="/absolute/path/to/folder" required />
-      </label>{" "}
-      <button type="submit">Add</button>
+      </label>
+      <Button type="submit">Add</Button>
     </ActionForm>
   );
 }
 
 export function RemoveProjectButton({ project }: { project: Project }) {
   return (
-    <ActionForm action={removeProject} label={`Remove ${project.path}`}>
+    <ActionForm action={removeProject} label={`Remove ${project.path}`} className="ml-auto">
       <input type="hidden" name="path" value={project.path} />
-      <button type="submit">Remove</button>
+      <Button type="submit" variant="danger">
+        Remove
+      </Button>
     </ActionForm>
   );
 }
 
 export function TrackerFolderForm({ project }: { project: Project }) {
   return (
-    <ActionForm action={setTrackerFolder} label="Tracker folder">
+    <ActionForm action={setTrackerFolder} label="Tracker folder" className={INLINE_FIELDS}>
       <input type="hidden" name="path" value={project.path} />
-      <label>
+      <label className={LABEL}>
         Tracker folder{" "}
         <Field
           name="trackerFolder"
           defaultValue={project.trackerFolder ?? ""}
           placeholder={`${DEFAULT_TRACKER_FOLDER} (default)`}
         />
-      </label>{" "}
-      <button type="submit">Set</button>{" "}
+      </label>
+      <Button type="submit">Set</Button>
       {project.trackerFolder !== undefined && (
-        <button type="submit" name="clear" value="clear">
+        <Button type="submit" name="clear" value="clear">
           Clear
-        </button>
+        </Button>
       )}
     </ActionForm>
   );
