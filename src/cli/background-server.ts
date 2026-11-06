@@ -110,10 +110,12 @@ export async function waitUntilAnswering(
 }
 
 // A listener that accepts the connection but never sends headers would
-// otherwise hold each probe for undici's 300-second headers timeout.
+// otherwise hold each probe for undici's 300-second headers timeout. A
+// redirect counts as an answer: following the app's `/` would render the
+// first Project's page, which can take longer than the probe allows.
 export async function isAnswering(url: string): Promise<boolean> {
   try {
-    await fetch(url, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
     return true;
   } catch {
     return false;

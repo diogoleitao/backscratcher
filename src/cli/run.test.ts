@@ -237,9 +237,9 @@ describe("backscratcher start", () => {
     expect(await isAnswering(url)).toBe(true);
   });
 
-  it("starts a new server when the record is not valid JSON", async () => {
+  it.each([["{ not json"], ["null"]])("starts a new server when the record is %s", async (contents) => {
     await mkdir(dataDir(), { recursive: true });
-    await writeFile(path.join(dataDir(), "server.json"), "{ not json");
+    await writeFile(path.join(dataDir(), "server.json"), contents);
 
     const result = await cli(["start"]);
 
@@ -303,6 +303,29 @@ describe("backscratcher start", () => {
     });
     expect(await serverRecord()).toBeUndefined();
     expect(isAlive(Number(await readFile(pidFile, "utf8")))).toBe(false);
+  });
+
+  it("counts a redirect from the URL as an answer, without following it", async () => {
+    // `/` redirects to the first Project's page, which can be slow to render.
+    const redirecting = `
+      require("node:http")
+        .createServer((req, res) => {
+          if (req.url === "/") res.writeHead(307, { location: "/slow" }).end();
+        })
+        .listen(Number(process.argv[1]), "127.0.0.1");
+    `;
+
+    const result = await cli(["start"], {
+      serverArgs: ["-e", redirecting, String(port)],
+      startTimeoutMs: 3_000,
+    });
+
+    expect(result).toEqual({
+      code: 0,
+      stdout: `backscratcher running at ${url}\n`,
+      stderr: "",
+      opened: [url],
+    });
   });
 
   it("fails, recording nothing, when the server exits before it answers", async () => {
@@ -372,9 +395,9 @@ describe("backscratcher stop", () => {
     }
   });
 
-  it("says so and clears the record when the record is not valid JSON", async () => {
+  it.each([["{ not json"], ["null"]])("says so and clears the record when the record is %s", async (contents) => {
     await mkdir(dataDir(), { recursive: true });
-    await writeFile(path.join(dataDir(), "server.json"), "{ not json");
+    await writeFile(path.join(dataDir(), "server.json"), contents);
 
     const result = await cli(["stop"]);
 
