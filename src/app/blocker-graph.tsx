@@ -5,10 +5,11 @@ import {
   layoutBlockerGraph,
   type Place,
 } from "../blocker-graph/blocker-graph.ts";
-import type { Feature, NormalisedStatus } from "../project-reader/project-reader.ts";
+import type { Feature } from "../project-reader/project-reader.ts";
 import type { Project } from "../registry/registry.ts";
 import { ticketHref } from "./project-urls.ts";
 import { statusText } from "./status-text.ts";
+import { statusTone } from "./tones.ts";
 
 const NODE_WIDTH = 190;
 const NODE_HEIGHT = 44;
@@ -25,21 +26,7 @@ const TEXT_INSET = 10;
 // Counts the whole line, Ticket number included, so most labels end in … before
 // the clip.
 const LABEL_LENGTH = 20;
-// Arrows and Ticket box outlines.
-const LINE = "#4b5563";
-const BROKEN = "#dc2626";
 const DASH = "5 4";
-
-const FILLS: Record<NormalisedStatus, string> = {
-  "needs-triage": "#fde68a",
-  "needs-info": "#fdba74",
-  "ready-for-agent": "#93c5fd",
-  "ready-for-human": "#c4b5fd",
-  wontfix: "#d1d5db",
-  done: "#bbf7d0",
-  other: "#f9a8d4",
-  none: "#ffffff",
-};
 
 const xOf = (column: number) => LEFT_MARGIN + column * (NODE_WIDTH + COLUMN_GAP);
 const yOf = (row: number) => MARGIN + row * (NODE_HEIGHT + ROW_GAP);
@@ -84,19 +71,18 @@ export function BlockerGraph({ project, feature }: { project: Project; feature: 
   const width = xOf(graph.columns) - COLUMN_GAP + RIGHT_MARGIN;
   const height = yOf(graph.rows) - ROW_GAP + MARGIN;
   return (
-    <div style={{ overflowX: "auto" }}>
+    <div className="overflow-x-auto">
       <svg
         width={width}
         height={height}
         viewBox={`0 0 ${width} ${height}`}
         role="group"
         aria-label="Blocker graph"
-        fontFamily="sans-serif"
         fontSize={12}
       >
         <defs>
-          <Arrowhead id="arrow" colour={LINE} />
-          <Arrowhead id="arrow-broken" colour={BROKEN} />
+          <Arrowhead id="arrow" className="fill-fg-muted" />
+          <Arrowhead id="arrow-broken" className="fill-danger" />
         </defs>
         {graph.edges.map((edge) => {
           const from = byId.get(edge.from);
@@ -107,7 +93,7 @@ export function BlockerGraph({ project, feature }: { project: Project; feature: 
               key={`${edge.from}->${edge.to}`}
               d={edgePath(from, to)}
               fill="none"
-              stroke={edge.broken ? BROKEN : LINE}
+              className={edge.broken ? "stroke-danger" : "stroke-fg-muted"}
               strokeDasharray={edge.broken ? DASH : undefined}
               markerEnd={edge.broken ? "url(#arrow-broken)" : "url(#arrow)"}
             />
@@ -144,9 +130,9 @@ function GraphNode({
     return (
       <g>
         <title>{`${node.reference}: no Ticket in this Feature matches`}</title>
-        <Box x={x} y={y} fill="#ffffff" stroke={BROKEN} dashed />
+        <Box x={x} y={y} className="fill-canvas stroke-danger" dashed />
         <BoxText id={clipId} x={x} y={y}>
-          <text x={x + TEXT_INSET} y={y + 27} fill={BROKEN}>
+          <text x={x + TEXT_INSET} y={y + 27} className="fill-danger">
             {shorten(node.reference)}
           </text>
         </BoxText>
@@ -158,12 +144,12 @@ function GraphNode({
     <Link href={ticketHref(project, feature, ticket)}>
       <g opacity={ticket.normalisedStatus === "done" ? 0.4 : 1}>
         <title>{`#${ticket.number} ${ticket.title} (${statusText(ticket)})`}</title>
-        <Box x={x} y={y} fill={FILLS[ticket.normalisedStatus]} stroke={LINE} />
+        <Box x={x} y={y} className={statusTone(ticket.normalisedStatus).box} />
         <BoxText id={clipId} x={x} y={y}>
-          <text x={x + TEXT_INSET} y={y + 18} fill="#111827">
+          <text x={x + TEXT_INSET} y={y + 18} className="fill-fg">
             {shorten(`#${ticket.number} ${ticket.title}`)}
           </text>
-          <text x={x + TEXT_INSET} y={y + 34} fill="#374151" fontSize={11}>
+          <text x={x + TEXT_INSET} y={y + 34} className="fill-fg-muted" fontSize={11}>
             {shorten(statusText(ticket))}
           </text>
         </BoxText>
@@ -195,7 +181,7 @@ function BoxText({
   );
 }
 
-function Arrowhead({ id, colour }: { id: string; colour: string }) {
+function Arrowhead({ id, className }: { id: string; className: string }) {
   return (
     <marker
       id={id}
@@ -206,7 +192,7 @@ function Arrowhead({ id, colour }: { id: string; colour: string }) {
       markerHeight={8}
       orient="auto"
     >
-      <path d="M0,0 L10,5 L0,10 z" fill={colour} />
+      <path d="M0,0 L10,5 L0,10 z" className={className} />
     </marker>
   );
 }
@@ -214,14 +200,13 @@ function Arrowhead({ id, colour }: { id: string; colour: string }) {
 function Box({
   x,
   y,
-  fill,
-  stroke,
+  className,
   dashed = false,
 }: {
   x: number;
   y: number;
-  fill: string;
-  stroke: string;
+  // The fill and stroke, as theme colour classes.
+  className: string;
   dashed?: boolean;
 }) {
   return (
@@ -231,8 +216,7 @@ function Box({
       width={NODE_WIDTH}
       height={NODE_HEIGHT}
       rx={6}
-      fill={fill}
-      stroke={stroke}
+      className={className}
       strokeDasharray={dashed ? DASH : undefined}
     />
   );

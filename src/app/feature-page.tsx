@@ -5,8 +5,11 @@ import { BlockerGraph } from "./blocker-graph.tsx";
 import { BlockerLinks } from "./blocker-links.tsx";
 import { MarkdownArticle } from "./markdown.tsx";
 import { projectHref, ticketHref } from "./project-urls.ts";
-import { statusText } from "./status-text.ts";
+import { StatusPill } from "./status-pill.tsx";
+import { Card, PageHeader } from "./ui.tsx";
 import { WarningBadges } from "./warning-badges.tsx";
+
+const CELL = "px-4 py-2 text-left align-top";
 
 export function FeaturePage({ project, feature }: { project: Project; feature: Feature }) {
   // Each warning shows in place of the part it says could not be read.
@@ -14,10 +17,7 @@ export function FeaturePage({ project, feature }: { project: Project; feature: F
   const issuesWarnings = feature.warnings.filter((warning) => warning.kind === "issues-unreadable");
   return (
     <>
-      <p>
-        <Link href={projectHref(project)}>All Features</Link>
-      </p>
-      <h3>{feature.slug}</h3>
+      <PageHeader back={{ href: projectHref(project), label: "All Features" }} title={feature.slug} />
       {feature.spec.source === undefined ? (
         <p>
           <WarningBadges warnings={specWarnings} />
@@ -25,43 +25,52 @@ export function FeaturePage({ project, feature }: { project: Project; feature: F
       ) : (
         <MarkdownArticle source={feature.spec.source} />
       )}
-      <h4>Tickets</h4>
-      {issuesWarnings.length > 0 ? (
-        <p>
-          <WarningBadges warnings={issuesWarnings} />
-        </p>
-      ) : feature.tickets.length === 0 ? (
-        <p>No Tickets in this Feature's issues/ folder.</p>
-      ) : (
-        <>
-          <BlockerGraph project={project} feature={feature} />
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Title</th>
-                <th>Status</th>
-                <th>Blocked by</th>
-              </tr>
-            </thead>
-            <tbody>
-              {feature.tickets.map((ticket) => (
-                <tr key={ticket.file}>
-                  <td>{ticket.number}</td>
-                  <td>
-                    <Link href={ticketHref(project, feature, ticket)}>{ticket.title}</Link>{" "}
-                    <WarningBadges warnings={ticket.warnings} />
-                  </td>
-                  <td>{statusText(ticket)}</td>
-                  <td>
-                    <BlockerLinks project={project} feature={feature} ticket={ticket} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
+      <Card title={<h4>Tickets</h4>}>
+        {issuesWarnings.length > 0 ? (
+          <p className="px-4 py-3">
+            <WarningBadges warnings={issuesWarnings} />
+          </p>
+        ) : feature.tickets.length === 0 ? (
+          <p className="px-4 py-3 text-fg-muted">No Tickets in this Feature's issues/ folder.</p>
+        ) : (
+          <>
+            <div className="border-b border-border p-2">
+              <BlockerGraph project={project} feature={feature} />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-canvas-subtle font-semibold text-fg-muted">
+                  <tr>
+                    <th className={`${CELL} w-12`}>#</th>
+                    <th className={CELL}>Title</th>
+                    <th className={CELL}>Status</th>
+                    <th className={CELL}>Blocked by</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-muted">
+                  {feature.tickets.map((ticket) => (
+                    <tr key={ticket.file} className="hover:bg-canvas-subtle">
+                      <td className={`${CELL} font-mono text-fg-muted`}>{ticket.number}</td>
+                      <td className={CELL}>
+                        <Link href={ticketHref(project, feature, ticket)} className="font-medium">
+                          {ticket.title}
+                        </Link>{" "}
+                        <WarningBadges warnings={ticket.warnings} />
+                      </td>
+                      <td className={`${CELL} whitespace-nowrap`}>
+                        <StatusPill ticket={ticket} />
+                      </td>
+                      <td className={CELL}>
+                        <BlockerLinks project={project} feature={feature} ticket={ticket} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </Card>
     </>
   );
 }
